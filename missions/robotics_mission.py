@@ -1,14 +1,18 @@
+from missions.mission import Mission
 from task import Task
 
 
-class RoboticsMission:
+class RoboticsMission(Mission):
     """
     Creates a robotics project mission.
     """
 
+    keyword = "robotics"
+    name = "Start Robotics Project"
+
     def build(self):
 
-        task = Task("Start Robotics Project")
+        task = Task(self.name)
 
         task.add_step(
             "file",

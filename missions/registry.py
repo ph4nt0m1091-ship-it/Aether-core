@@ -24,5 +24,13 @@ class MissionRegistry:
         return None
 
     def available_missions(self):
-
+        """
+        Returns the registered mission keywords.
+        """
         return list(self.missions.keys())
+
+    def list_missions(self):
+        """
+        Returns the names of all registered missions.
+        """
+        return [mission.name for mission in self.missions.values()]
