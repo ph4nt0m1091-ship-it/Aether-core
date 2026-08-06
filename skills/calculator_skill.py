@@ -2,8 +2,14 @@ from tools.calculator_tool import CalculatorTool
 
 
 class CalculatorSkill:
+    """
+    Handles calculator requests.
+    """
+
+    name = "calculator"
 
     def __init__(self, memory):
+
         self.memory = memory
         self.calculator = CalculatorTool()
 
@@ -38,3 +44,10 @@ class CalculatorSkill:
             return "Aether: I couldn't calculate that."
 
         return f"Aether: The answer is {result}."
+
+    def execute(self, step):
+        """
+        CalculatorSkill is not used by missions.
+        """
+
+        return None

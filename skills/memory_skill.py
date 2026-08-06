@@ -1,11 +1,17 @@
 class MemorySkill:
+    """
+    Handles memory-related conversation.
+    """
+
+    name = "memory"
 
     def __init__(self, memory):
+
         self.memory = memory
 
     def handle(self, message):
 
-        message = message.lower()
+        message = message.lower().strip()
 
         # -------------------
         # NAME
@@ -62,5 +68,12 @@ class MemorySkill:
                 return "Aether: You like " + ", ".join(likes) + "."
 
             return "Aether: I don't know what you like yet."
+
+        return None
+
+    def execute(self, step):
+        """
+        MemorySkill is not used by missions.
+        """
 
         return None

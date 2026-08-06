@@ -8,9 +8,16 @@ class MissionRegistry:
 
     def __init__(self):
 
-        self.missions = {
-            "robotics": RoboticsMission()
-        }
+        self.missions = {}
+
+        self.register(RoboticsMission())
+
+    def register(self, mission):
+        """
+        Registers a mission using its keyword.
+        """
+
+        self.missions[mission.keyword] = mission
 
     def get(self, goal):
 
@@ -27,10 +34,12 @@ class MissionRegistry:
         """
         Returns the registered mission keywords.
         """
+
         return list(self.missions.keys())
 
     def list_missions(self):
         """
         Returns the names of all registered missions.
         """
+
         return [mission.name for mission in self.missions.values()]

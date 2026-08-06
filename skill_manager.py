@@ -1,54 +1,28 @@
-from skills.greeting_skill import GreetingSkill
-from skills.memory_skill import MemorySkill
-from skills.calculator_skill import CalculatorSkill
-from skills.time_skill import TimeSkill
-from skills.file_skill import FileSkill
+from skills.registry import SkillRegistry
 
 
 class SkillManager:
     """
-    Routes messages and mission steps
-    to the correct skill.
+    Manages all of Aether's skills.
     """
 
     def __init__(self, memory):
 
-        self.skills = {
-            "greeting": GreetingSkill(memory),
-            "memory": MemorySkill(memory),
-           "calculator": CalculatorSkill(memory),
-           "time": TimeSkill(memory),
-            "file": FileSkill()
-        }
+        self.memory = memory
+
+        self.registry = SkillRegistry(memory)
 
     def handle(self, message):
 
-        for skill in self.skills.values():
-
-            if hasattr(skill, "handle"):
-
-                response = skill.handle(message)
-
-                if response:
-                    return response
-
-        return None
+        return self.registry.handle(message)
 
     def execute(self, step):
 
-        skill_name = step["skill"]
+        self.registry.execute(step)
 
-        skill = self.skills.get(skill_name)
+    def available_skills(self):
+        """
+        Returns every registered skill.
+        """
 
-        if skill is None:
-
-            print(f"Aether: Unknown skill '{skill_name}'")
-            return
-
-        if hasattr(skill, "execute"):
-
-            skill.execute(step)
-
-        else:
-
-            print(f"Aether: Skill '{skill_name}' cannot execute tasks.")
+        return self.registry.available_skills()

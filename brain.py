@@ -22,7 +22,48 @@ class Brain:
 
         message = message.strip()
 
-        # Ask the planner if this is a mission
+        lower = message.lower()
+
+        # ----------------------------
+        # Mission awareness
+        # ----------------------------
+
+        if lower in (
+            "what missions do you have",
+            "what missions do you know",
+            "list missions",
+            "show missions"
+        ):
+
+            missions = self.planner.available_missions()
+
+            return (
+                "Aether: I currently know these missions:\n\n- "
+                + "\n- ".join(missions)
+            )
+
+        # ----------------------------
+        # Skill awareness
+        # ----------------------------
+
+        if lower in (
+            "what skills do you have",
+            "what skills do you know",
+            "list skills",
+            "show skills"
+        ):
+
+            skills = self.skill_manager.available_skills()
+
+            return (
+                "Aether: I currently have these skills:\n\n- "
+                + "\n- ".join(skills)
+            )
+
+        # ----------------------------
+        # Mission execution
+        # ----------------------------
+
         task = self.planner.create_task(message)
 
         if task:
@@ -31,7 +72,10 @@ class Brain:
 
             return "Aether: Mission finished."
 
+        # ----------------------------
         # Normal conversation
+        # ----------------------------
+
         response = self.skill_manager.handle(message)
 
         if response:

@@ -1,9 +1,17 @@
 class GreetingSkill:
+    """
+    Handles greetings and farewells.
+    """
+
+    name = "greeting"
 
     def __init__(self, memory):
+
         self.memory = memory
 
     def handle(self, message):
+
+        message = message.lower().strip()
 
         greetings = [
             "hello",
@@ -31,5 +39,12 @@ class GreetingSkill:
                 return f"Aether: Good night, {name}. Sleep well."
 
             return "Aether: Good night. Sleep well."
+
+        return None
+
+    def execute(self, step):
+        """
+        GreetingSkill is not used by missions.
+        """
 
         return None
