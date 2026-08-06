@@ -1,21 +1,21 @@
-from missions.robotics_mission import RoboticsMission
+from missions.registry import MissionRegistry
 
 
 class Planner:
     """
-    Decides which mission should build the task.
+    Chooses the correct mission using the Mission Registry.
     """
 
     def __init__(self):
 
-        self.robotics = RoboticsMission()
+        self.registry = MissionRegistry()
 
     def create_task(self, goal):
 
-        goal = goal.lower()
+        mission = self.registry.get(goal)
 
-        if "robotics" in goal:
+        if mission:
 
-            return self.robotics.build()
+            return mission.build()
 
-        return None
+        return Nones
