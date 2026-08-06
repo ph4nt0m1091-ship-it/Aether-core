@@ -22,3 +22,7 @@ class MissionRegistry:
                 return mission
 
         return None
+
+    def available_missions(self):
+
+        return list(self.missions.keys())

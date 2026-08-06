@@ -18,4 +18,4 @@ class Planner:
 
             return mission.build()
 
-        return Nones
+        return None

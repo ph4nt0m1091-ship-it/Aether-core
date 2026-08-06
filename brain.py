@@ -22,10 +22,10 @@ class Brain:
 
         message = message.strip()
 
-        # Mission request
-        if "robotics" in message.lower():
+        # Ask the planner if this is a mission
+        task = self.planner.create_task(message)
 
-            task = self.planner.create_task(message)
+        if task:
 
             self.executor.execute(task)
 

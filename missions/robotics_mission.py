@@ -19,19 +19,19 @@ class RoboticsMission:
         task.add_step(
             "file",
             "create_file",
-            filename="README.md"
+            filename="robotics/README.md"
         )
 
         task.add_step(
             "file",
             "create_file",
-            filename="main.py"
+            filename="robotics/main.py"
         )
 
         task.add_step(
             "file",
             "create_file",
-            filename="notes.txt"
+            filename="robotics/notes.txt"
         )
 
         return task
