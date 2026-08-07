@@ -15,7 +15,6 @@ class Cortex:
         self.progress = 0
         self.plan = None
 
-        # Workspace
         self.projects = ProjectManager()
         self.current_project = None
 
@@ -56,9 +55,7 @@ class Cortex:
 
             if self.current_project:
 
-                self.current_project.update_progress(
-                    self.progress
-                )
+                self.current_project.update_progress(self.progress)
 
                 self.projects.save()
 
@@ -78,9 +75,7 @@ class Cortex:
 
             if self.current_project:
 
-                self.current_project.update_progress(
-                    self.progress
-                )
+                self.current_project.update_progress(self.progress)
 
                 if self.progress == 100:
 
@@ -108,6 +103,30 @@ class Cortex:
     def get_current_project(self):
 
         return self.current_project
+
+    # ---------------------------------
+    # Notes
+    # ---------------------------------
+
+    def add_note(self, note):
+
+        if self.current_project is None:
+
+            return False
+
+        self.current_project.add_note(note)
+
+        self.projects.save()
+
+        return True
+
+    def get_notes(self):
+
+        if self.current_project is None:
+
+            return []
+
+        return self.current_project.get_notes()
 
     # ---------------------------------
     # Existing getters
