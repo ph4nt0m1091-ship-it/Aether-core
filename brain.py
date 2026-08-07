@@ -38,6 +38,69 @@ class Brain:
 
         intent = self.intent.analyze(message)
 
+        # ----------------------------
+        # Cortex Awareness
+        # ----------------------------
+
+        if lower in (
+            "what is your current goal",
+            "what are you working on",
+            "current goal",
+            "goal",
+        ):
+
+            goal = self.cortex.get_goal()
+
+            if goal:
+
+                return (
+                    f"Aether:\n\n"
+                    f"Current Goal: {goal}\n"
+                    f"Status: {self.cortex.get_status()}\n"
+                    f"Progress: {self.cortex.get_progress()}%"
+                )
+
+            return "Aether: I don't have a current goal."
+
+        # ----------------------------
+        # Show Plan
+        # ----------------------------
+
+        if lower in (
+            "show plan",
+            "what is the plan",
+            "show my plan",
+            "plan",
+        ):
+
+            plan = self.cortex.get_plan()
+
+            if not plan:
+
+                return "Aether: I don't have an active plan yet."
+
+            lines = [
+                "Aether:",
+                "",
+                f"Goal: {plan.goal}",
+                "",
+                "Plan:",
+            ]
+
+            for step in plan.list_steps():
+
+                mark = "✓" if step["completed"] else "□"
+
+                lines.append(f"{mark} {step['description']}")
+
+            lines.append("")
+            lines.append(
+                f"Progress: {plan.progress()}%"
+            )
+
+            return "\n".join(lines)
+
+        # Store newest goal
         self.cortex.set_goal(message)
 
         # ----------------------------
