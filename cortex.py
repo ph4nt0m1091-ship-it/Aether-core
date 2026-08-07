@@ -1,5 +1,6 @@
 from planners.planner_factory import PlannerFactory
 from storage.goal_storage import GoalStorage
+from projects.manager import ProjectManager
 
 
 class Cortex:
@@ -18,17 +19,27 @@ class Cortex:
 
         self.storage = GoalStorage()
 
-        # Restore previous goal if one exists
+        self.projects = ProjectManager()
+
         self.storage.restore(self)
 
     def set_goal(self, goal):
 
         self.current_goal = goal
+
         self.goal_status = "Active"
 
         self.plan = self.factory.create_plan(goal)
 
         self.progress = self.plan.progress()
+
+        project = self.projects.create_project(goal)
+
+        project.set_goal(goal)
+
+        project.update_progress(self.progress)
+
+        self.projects.save()
 
         self.storage.save(self)
 
@@ -39,6 +50,16 @@ class Cortex:
             self.plan.add_step(step)
 
             self.progress = self.plan.progress()
+
+            project = self.projects.get_project(
+                self.current_goal
+            )
+
+            if project:
+
+                project.update_progress(self.progress)
+
+            self.projects.save()
 
             self.storage.save(self)
 
@@ -53,6 +74,16 @@ class Cortex:
             if self.progress == 100:
 
                 self.goal_status = "Completed"
+
+            project = self.projects.get_project(
+                self.current_goal
+            )
+
+            if project:
+
+                project.update_progress(self.progress)
+
+            self.projects.save()
 
             self.storage.save(self)
 
@@ -71,3 +102,7 @@ class Cortex:
     def get_plan(self):
 
         return self.plan
+
+    def list_projects(self):
+
+        return self.projects.list_projects()
