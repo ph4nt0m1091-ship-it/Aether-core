@@ -1,8 +1,8 @@
-from cortex import Cortex
 from intent import IntentAnalyzer
 from planner import Planner
 from task_executor import TaskExecutor
 from skill_manager import SkillManager
+from cortex import Cortex
 
 
 class Brain:
@@ -14,11 +14,11 @@ class Brain:
 
         self.memory = memory
 
-        self.cortex = Cortex()
+        self.intent = IntentAnalyzer()
 
         self.planner = Planner()
 
-        self.intent = IntentAnalyzer()
+        self.cortex = Cortex()
 
         self.skill_manager = SkillManager(memory)
 
@@ -28,90 +28,19 @@ class Brain:
 
         message = message.strip()
 
-        lower = (
-            message.lower()
-            .replace("?", "")
-            .replace(".", "")
-            .replace("!", "")
-            .replace(",", "")
-        )
+        lower = message.lower()
 
         intent = self.intent.analyze(message)
-
-        # ----------------------------
-        # Cortex Awareness
-        # ----------------------------
-
-        if lower in (
-            "what is your current goal",
-            "what are you working on",
-            "current goal",
-            "goal",
-        ):
-
-            goal = self.cortex.get_goal()
-
-            if goal:
-
-                return (
-                    f"Aether:\n\n"
-                    f"Current Goal: {goal}\n"
-                    f"Status: {self.cortex.get_status()}\n"
-                    f"Progress: {self.cortex.get_progress()}%"
-                )
-
-            return "Aether: I don't have a current goal."
-
-        # ----------------------------
-        # Show Plan
-        # ----------------------------
-
-        if lower in (
-            "show plan",
-            "what is the plan",
-            "show my plan",
-            "plan",
-        ):
-
-            plan = self.cortex.get_plan()
-
-            if not plan:
-
-                return "Aether: I don't have an active plan yet."
-
-            lines = [
-                "Aether:",
-                "",
-                f"Goal: {plan.goal}",
-                "",
-                "Plan:",
-            ]
-
-            for step in plan.list_steps():
-
-                mark = "✓" if step["completed"] else "□"
-
-                lines.append(f"{mark} {step['description']}")
-
-            lines.append("")
-            lines.append(
-                f"Progress: {plan.progress()}%"
-            )
-
-            return "\n".join(lines)
-
-        # Store newest goal
-        self.cortex.set_goal(message)
 
         # ----------------------------
         # Mission awareness
         # ----------------------------
 
-        if lower in (
+        if lower.rstrip("?") in (
             "what missions do you have",
             "what missions do you know",
             "list missions",
-            "show missions",
+            "show missions"
         ):
 
             missions = self.planner.available_missions()
@@ -125,11 +54,11 @@ class Brain:
         # Skill awareness
         # ----------------------------
 
-        if lower in (
+        if lower.rstrip("?") in (
             "what skills do you have",
             "what skills do you know",
             "list skills",
-            "show skills",
+            "show skills"
         ):
 
             skills = self.skill_manager.available_skills()
@@ -140,10 +69,57 @@ class Brain:
             )
 
         # ----------------------------
+        # Show Plan
+        # ----------------------------
+
+        if intent == "show_plan":
+
+            plan = self.cortex.get_plan()
+
+            if not plan:
+
+                return "Aether: No active goal."
+
+            output = f"\nGoal: {self.cortex.get_goal()}\n\n"
+            output += "Plan:\n"
+
+            for i, step in enumerate(plan.steps):
+
+                mark = "✓" if step["completed"] else "□"
+
+                output += f"{mark} {i + 1}. {step['description']}\n"
+
+            output += f"\nProgress: {self.cortex.get_progress()}%"
+
+            return output
+
+        # ----------------------------
+        # Complete Step
+        # ----------------------------
+
+        if intent == "complete_step":
+
+            try:
+
+                number = int(
+                    lower.replace("complete step", "").strip()
+                )
+
+                self.cortex.complete_step(number - 1)
+
+                return "Aether: Step completed."
+
+            except ValueError:
+
+                return "Aether: Please specify a valid step number."
+
+        # ----------------------------
         # Mission execution
         # ----------------------------
 
         if intent == "mission":
+
+            self.cortex.set_goal(message)
 
             task = self.planner.create_task(message)
 
@@ -153,8 +129,10 @@ class Brain:
 
                 return "Aether: Mission finished."
 
+            return "Aether: Goal added to Cortex."
+
         # ----------------------------
-        # Normal conversation
+        # Conversation
         # ----------------------------
 
         response = self.skill_manager.handle(message)

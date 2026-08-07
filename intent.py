@@ -7,11 +7,34 @@ class IntentAnalyzer:
 
         message = message.lower().strip()
 
-        if any(word in message for word in (
-            "robot",
-            "robotics",
-            "robotic"
-        )):
+        # ----------------------------
+        # Progress commands
+        # ----------------------------
+
+        if message.startswith("complete step"):
+
+            return "complete_step"
+
+        # ----------------------------
+        # Planning commands
+        # ----------------------------
+
+        if message.startswith("show plan"):
+
+            return "show_plan"
+
+        # ----------------------------
+        # Mission commands
+        # ----------------------------
+
+        mission_words = [
+            "start",
+            "build",
+            "create",
+            "make"
+        ]
+
+        if any(message.startswith(word) for word in mission_words):
 
             return "mission"
 
