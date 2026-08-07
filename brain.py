@@ -1,3 +1,4 @@
+from intent import IntentAnalyzer
 from planner import Planner
 from task_executor import TaskExecutor
 from skill_manager import SkillManager
@@ -14,6 +15,8 @@ class Brain:
 
         self.planner = Planner()
 
+        self.intent = IntentAnalyzer()
+
         self.skill_manager = SkillManager(memory)
 
         self.executor = TaskExecutor(self.skill_manager)
@@ -23,6 +26,8 @@ class Brain:
         message = message.strip()
 
         lower = message.lower()
+
+        intent = self.intent.analyze(message)
 
         # ----------------------------
         # Mission awareness
@@ -64,13 +69,15 @@ class Brain:
         # Mission execution
         # ----------------------------
 
-        task = self.planner.create_task(message)
+        if intent == "mission":
 
-        if task:
+            task = self.planner.create_task(message)
 
-            self.executor.execute(task)
+            if task:
 
-            return "Aether: Mission finished."
+                self.executor.execute(task)
+
+                return "Aether: Mission finished."
 
         # ----------------------------
         # Normal conversation

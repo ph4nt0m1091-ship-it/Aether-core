@@ -1,14 +1,12 @@
-from abc import ABC, abstractmethod
-
-
-class Mission(ABC):
+class Mission:
     """
     Base class for every Aether mission.
     """
 
+    name = "Unnamed Mission"
     keyword = ""
-    name = ""
 
-    @abstractmethod
     def build(self):
-        pass
+        raise NotImplementedError(
+            "Every mission must implement build()."
+        )

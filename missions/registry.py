@@ -1,4 +1,4 @@
-from missions.robotics_mission import RoboticsMission
+from missions.loader import load_missions
 
 
 class MissionRegistry:
@@ -10,7 +10,9 @@ class MissionRegistry:
 
         self.missions = {}
 
-        self.register(RoboticsMission())
+        for mission in load_missions():
+
+            self.register(mission)
 
     def register(self, mission):
         """

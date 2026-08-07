@@ -3,7 +3,7 @@ import time
 from brain import Brain
 from memory import Memory
 
-VERSION = "0.6 Mission Registry"
+VERSION = "0.9.1 Intent Analyzer"
 
 
 def boot():
