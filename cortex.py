@@ -15,18 +15,20 @@ class Cortex:
         self.progress = 0
         self.plan = None
 
-        self.factory = PlannerFactory()
+        # Workspace
+        self.projects = ProjectManager()
+        self.current_project = None
 
+        self.factory = PlannerFactory()
         self.storage = GoalStorage()
 
-        self.projects = ProjectManager()
-
-        self.storage.restore(self)
+    # ---------------------------------
+    # Goals
+    # ---------------------------------
 
     def set_goal(self, goal):
 
         self.current_goal = goal
-
         self.goal_status = "Active"
 
         self.plan = self.factory.create_plan(goal)
@@ -36,8 +38,9 @@ class Cortex:
         project = self.projects.create_project(goal)
 
         project.set_goal(goal)
-
         project.update_progress(self.progress)
+
+        self.current_project = project
 
         self.projects.save()
 
@@ -51,15 +54,13 @@ class Cortex:
 
             self.progress = self.plan.progress()
 
-            project = self.projects.get_project(
-                self.current_goal
-            )
+            if self.current_project:
 
-            if project:
+                self.current_project.update_progress(
+                    self.progress
+                )
 
-                project.update_progress(self.progress)
-
-            self.projects.save()
+                self.projects.save()
 
             self.storage.save(self)
 
@@ -75,17 +76,42 @@ class Cortex:
 
                 self.goal_status = "Completed"
 
-            project = self.projects.get_project(
-                self.current_goal
-            )
+            if self.current_project:
 
-            if project:
+                self.current_project.update_progress(
+                    self.progress
+                )
 
-                project.update_progress(self.progress)
+                if self.progress == 100:
 
-            self.projects.save()
+                    self.current_project.status = "Completed"
+
+                self.projects.save()
 
             self.storage.save(self)
+
+    # ---------------------------------
+    # Active Workspace
+    # ---------------------------------
+
+    def switch_project(self, name):
+
+        project = self.projects.get_project(name)
+
+        if project:
+
+            self.current_project = project
+            return True
+
+        return False
+
+    def get_current_project(self):
+
+        return self.current_project
+
+    # ---------------------------------
+    # Existing getters
+    # ---------------------------------
 
     def get_goal(self):
 
@@ -102,7 +128,3 @@ class Cortex:
     def get_plan(self):
 
         return self.plan
-
-    def list_projects(self):
-
-        return self.projects.list_projects()
