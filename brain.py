@@ -1,3 +1,4 @@
+from cortex import Cortex
 from intent import IntentAnalyzer
 from planner import Planner
 from task_executor import TaskExecutor
@@ -13,6 +14,8 @@ class Brain:
 
         self.memory = memory
 
+        self.cortex = Cortex()
+
         self.planner = Planner()
 
         self.intent = IntentAnalyzer()
@@ -25,9 +28,17 @@ class Brain:
 
         message = message.strip()
 
-        lower = message.lower()
+        lower = (
+            message.lower()
+            .replace("?", "")
+            .replace(".", "")
+            .replace("!", "")
+            .replace(",", "")
+        )
 
         intent = self.intent.analyze(message)
+
+        self.cortex.set_goal(message)
 
         # ----------------------------
         # Mission awareness
@@ -37,7 +48,7 @@ class Brain:
             "what missions do you have",
             "what missions do you know",
             "list missions",
-            "show missions"
+            "show missions",
         ):
 
             missions = self.planner.available_missions()
@@ -55,7 +66,7 @@ class Brain:
             "what skills do you have",
             "what skills do you know",
             "list skills",
-            "show skills"
+            "show skills",
         ):
 
             skills = self.skill_manager.available_skills()
