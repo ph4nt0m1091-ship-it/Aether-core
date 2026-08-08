@@ -23,7 +23,11 @@ class ProjectStorage:
 
                 "status": project.status,
 
-                "progress": project.progress
+                "progress": project.progress,
+
+                "notes": project.notes,
+
+                "tags": project.tags
 
             })
 
@@ -45,10 +49,28 @@ class ProjectStorage:
 
         for item in data:
 
-            project = project_manager.create_project(item["name"])
+            project = project_manager.create_project(
+                item["name"]
+            )
 
-            project.goal = item["goal"]
+            project.goal = item.get("goal", "")
 
-            project.status = item["status"]
+            project.status = item.get(
+                "status",
+                "Active"
+            )
 
-            project.progress = item["progress"]
+            project.progress = item.get(
+                "progress",
+                0
+            )
+
+            project.notes = item.get(
+                "notes",
+                []
+            )
+
+            project.tags = item.get(
+                "tags",
+                []
+            )

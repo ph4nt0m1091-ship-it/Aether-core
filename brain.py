@@ -6,26 +6,35 @@ from cortex import Cortex
 
 from commands.command_router import CommandRouter
 from commands.project_commands import ProjectCommands
+from commands.goal_commands import GoalCommands
+from commands.note_commands import NoteCommands
 
 
 class Brain:
     """
     Aether's central coordinator.
+
+    Brain receives user input and routes commands
+    to the appropriate subsystem.
     """
 
     def __init__(self, memory):
 
         self.memory = memory
 
+        # ----------------------------
+        # Core Systems
+        # ----------------------------
+
         self.intent = IntentAnalyzer()
 
-        self.skill_manager = SkillManager(memory)
+        self.cortex = Cortex()
 
         self.planner = Planner()
 
-        self.executor = TaskExecutor(self.skill_manager)
+        self.skill_manager = SkillManager(memory)
 
-        self.cortex = Cortex()
+        self.executor = TaskExecutor(self.skill_manager)
 
         # ----------------------------
         # Command Router
@@ -34,18 +43,24 @@ class Brain:
         self.router = CommandRouter()
 
         self.router.register(ProjectCommands())
+        self.router.register(GoalCommands())
+        self.router.register(NoteCommands())
+
+    # ----------------------------
+    # Main Thought Cycle
+    # ----------------------------
 
     def think(self, message):
 
         message = message.strip()
 
-        lower = message.lower().rstrip("?")
+        if not message:
 
-        intent = self.intent.analyze(message)
+            return "Aether: I didn't catch that."
 
-        # ---------------------------------
-        # Router
-        # ---------------------------------
+        # ----------------------------
+        # Command Router
+        # ----------------------------
 
         response = self.router.handle(self, message)
 
@@ -53,66 +68,69 @@ class Brain:
 
             return response
 
-        # ---------------------------------
+        # ----------------------------
+        # Normalize Input
+        # ----------------------------
+
+        lower = message.lower().rstrip("?")
+
+        # ----------------------------
         # Mission Awareness
-        # ---------------------------------
+        # ----------------------------
 
         if lower in (
-
             "what missions do you know",
-
             "what missions do you have",
-
             "list missions",
-
             "show missions"
-
         ):
 
             missions = self.planner.available_missions()
+
+            if not missions:
+
+                return (
+                    "Aether: I don't currently have any missions."
+                )
 
             return (
                 "Aether: I currently know these missions:\n\n- "
                 + "\n- ".join(missions)
             )
 
-        # ---------------------------------
+        # ----------------------------
         # Skill Awareness
-        # ---------------------------------
+        # ----------------------------
 
         if lower in (
-
             "what skills do you know",
-
             "what skills do you have",
-
             "list skills",
-
             "show skills"
-
         ):
 
             skills = self.skill_manager.available_skills()
+
+            if not skills:
+
+                return (
+                    "Aether: I don't currently have any skills."
+                )
 
             return (
                 "Aether: I currently have these skills:\n\n- "
                 + "\n- ".join(skills)
             )
 
-        # ---------------------------------
+        # ----------------------------
         # Project Awareness
-        # ---------------------------------
+        # ----------------------------
 
         if lower in (
-
             "show projects",
-
             "list projects",
-
             "what projects",
-
             "what projects do i have"
-
         ):
 
             projects = self.cortex.projects.list_projects()
@@ -121,29 +139,29 @@ class Brain:
 
                 return "Aether: No projects yet."
 
-            output = "Aether: Current Projects:\n\n"
-
             active = self.cortex.get_current_project()
+
+            output = "Aether: Current Projects:\n\n"
 
             for project in projects:
 
-                star = ""
+                marker = ""
 
                 if active is project:
 
-                    star = " ⭐"
+                    marker = " ⭐"
 
                 output += (
-                    f"• {project.name}{star}\n"
+                    f"• {project.name}{marker}\n"
                     f"Status: {project.status}\n"
                     f"Progress: {project.progress}%\n\n"
                 )
 
             return output
 
-        # ---------------------------------
+        # ----------------------------
         # Create Project
-        # ---------------------------------
+        # ----------------------------
 
         if lower.startswith("create project "):
 
@@ -151,80 +169,23 @@ class Brain:
 
             if not name:
 
-                return "Aether: Please provide a project name."
+                return (
+                    "Aether: Please provide a project name."
+                )
 
             project = self.cortex.projects.create_project(name)
 
             self.cortex.projects.save()
 
-            return f'Aether: Project "{project.name}" created.'
-
-        # ---------------------------------
-        # Build Goal
-        # ---------------------------------
-
-        if lower.startswith("build "):
-
-            goal = message[6:].strip()
-
-            self.cortex.set_goal(goal)
-
-            return "Aether: Goal added to Cortex."
-
-        # ---------------------------------
-        # Show Plan
-        # ---------------------------------
-
-        if lower == "show plan":
-
-            plan = self.cortex.get_plan()
-
-            if plan is None:
-
-                return "Aether: No active plan."
-
-            output = (
-                f"Goal: {self.cortex.get_goal()}\n\n"
-                "Plan:\n"
+            return (
+                f'Aether: Project "{project.name}" created.'
             )
 
-            for i, step in enumerate(plan.steps, start=1):
-
-                mark = "✓" if step["completed"] else "□"
-
-                output += (
-                    f"{mark} {i}. "
-                    f"{step['description']}\n"
-                )
-
-            output += (
-                f"\nProgress: "
-                f"{self.cortex.get_progress()}%"
-            )
-
-            return output
-
-        # ---------------------------------
-        # Complete Step
-        # ---------------------------------
-
-        if lower.startswith("complete step"):
-
-            try:
-
-                index = int(lower.split()[-1]) - 1
-
-                self.cortex.complete_step(index)
-
-                return "Aether: Step completed."
-
-            except Exception:
-
-                return "Aether: Invalid step."
-
-        # ---------------------------------
+        # ----------------------------
         # Mission Execution
-        # ---------------------------------
+        # ----------------------------
+
+        intent = self.intent.analyze(message)
 
         if intent == "mission":
 
@@ -236,9 +197,9 @@ class Brain:
 
                 return "Aether: Mission finished."
 
-        # ---------------------------------
-        # Normal Conversation
-        # ---------------------------------
+        # ----------------------------
+        # Skills / Normal Conversation
+        # ----------------------------
 
         response = self.skill_manager.handle(message)
 
@@ -246,4 +207,10 @@ class Brain:
 
             return response
 
-        return "Aether: I'm not sure how to help with that yet."
+        # ----------------------------
+        # Unknown Command
+        # ----------------------------
+
+        return (
+            "Aether: I'm not sure how to help with that yet."
+        )

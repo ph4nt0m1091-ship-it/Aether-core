@@ -1,20 +1,28 @@
 [
     {
         "name": "a robot",
-        "goal": "",
+        "goal": "a robot",
         "status": "Active",
-        "progress": 0
+        "progress": 25,
+        "notes": [],
+        "tags": []
     },
     {
         "name": "electronics",
         "goal": "",
         "status": "Active",
-        "progress": 0
+        "progress": 0,
+        "notes": [
+            "Research motor drivers"
+        ],
+        "tags": []
     },
     {
         "name": "coding",
         "goal": "",
         "status": "Active",
-        "progress": 0
+        "progress": 0,
+        "notes": [],
+        "tags": []
     }
 ]

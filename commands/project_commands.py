@@ -12,11 +12,8 @@ class ProjectCommands:
         # ----------------------------
 
         if lower in (
-
             "current project",
-
             "show current project"
-
         ):
 
             project = brain.cortex.get_current_project()
@@ -37,10 +34,14 @@ class ProjectCommands:
 
             name = message[len("switch project "):].strip()
 
+            if not name:
+
+                return "Aether: Please provide a project name."
+
             if brain.cortex.switch_project(name):
 
                 return (
-                    f'Aether: Current project set to "{name}".'
+                    f'Aether: Current project set to "{name.lower()}".'
                 )
 
             return "Aether: Project not found."

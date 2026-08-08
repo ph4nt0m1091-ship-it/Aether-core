@@ -1,11 +1,11 @@
 {
     "goal": "a robot",
     "status": "Active",
-    "progress": 0,
+    "progress": 25,
     "steps": [
         {
             "description": "Research robotics",
-            "completed": false
+            "completed": true
         },
         {
             "description": "Choose hardware",
