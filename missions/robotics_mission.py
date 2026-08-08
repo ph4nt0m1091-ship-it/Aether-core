@@ -14,6 +14,10 @@ class RoboticsMission(Mission):
 
         task = Task(self.name)
 
+        # ----------------------------
+        # Create Robotics Workspace
+        # ----------------------------
+
         task.add_step(
             "file",
             "create_folder",

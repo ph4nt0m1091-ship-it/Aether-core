@@ -27,7 +27,9 @@ class ProjectStorage:
 
                 "notes": project.notes,
 
-                "tags": project.tags
+                "tags": project.tags,
+
+                "activity": project.activity
 
             })
 
@@ -35,7 +37,11 @@ class ProjectStorage:
 
         with open(self.FILE, "w") as file:
 
-            json.dump(data, file, indent=4)
+            json.dump(
+                data,
+                file,
+                indent=4
+            )
 
     def restore(self, project_manager):
 
@@ -53,7 +59,10 @@ class ProjectStorage:
                 item["name"]
             )
 
-            project.goal = item.get("goal", "")
+            project.goal = item.get(
+                "goal",
+                ""
+            )
 
             project.status = item.get(
                 "status",
@@ -74,3 +83,31 @@ class ProjectStorage:
                 "tags",
                 []
             )
+
+            # -----------------------------
+            # Activity Compatibility
+            # -----------------------------
+
+            activity = item.get(
+                "activity",
+                []
+            )
+
+            restored_activity = []
+
+            for event in activity:
+
+                # New timestamped event
+                if isinstance(event, dict):
+
+                    restored_activity.append(event)
+
+                # Old string event
+                else:
+
+                    restored_activity.append({
+                        "timestamp": "Unknown",
+                        "message": str(event)
+                    })
+
+            project.activity = restored_activity

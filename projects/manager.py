@@ -15,21 +15,41 @@ class ProjectManager:
 
         self.storage.restore(self)
 
+    # -----------------------------
+    # Create Project
+    # -----------------------------
+
     def create_project(self, name):
 
         name = name.strip().lower()
 
         if name not in self.projects:
 
-            self.projects[name] = Project(name)
+            project = Project(name)
+
+            project.add_activity(
+                "Project created"
+            )
+
+            self.projects[name] = project
 
             self.storage.save(self)
 
         return self.projects[name]
 
+    # -----------------------------
+    # Get Project
+    # -----------------------------
+
     def get_project(self, name):
 
-        return self.projects.get(name.strip().lower())
+        return self.projects.get(
+            name.strip().lower()
+        )
+
+    # -----------------------------
+    # Delete Project
+    # -----------------------------
 
     def delete_project(self, name):
 
@@ -39,15 +59,25 @@ class ProjectManager:
 
             del self.projects[name]
 
-            self.storage.save()
+            self.storage.save(self)
 
             return True
 
         return False
 
+    # -----------------------------
+    # List Projects
+    # -----------------------------
+
     def list_projects(self):
 
-        return list(self.projects.values())
+        return list(
+            self.projects.values()
+        )
+
+    # -----------------------------
+    # Save
+    # -----------------------------
 
     def save(self):
 

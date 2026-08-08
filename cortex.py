@@ -37,7 +37,14 @@ class Cortex:
         project = self.projects.create_project(goal)
 
         project.set_goal(goal)
-        project.update_progress(self.progress)
+
+        project.update_progress(
+            self.progress
+        )
+
+        project.add_activity(
+            f"Goal set: {goal}"
+        )
 
         self.current_project = project
 
@@ -55,7 +62,13 @@ class Cortex:
 
             if self.current_project:
 
-                self.current_project.update_progress(self.progress)
+                self.current_project.update_progress(
+                    self.progress
+                )
+
+                self.current_project.add_activity(
+                    f"Plan step added: {step}"
+                )
 
                 self.projects.save()
 
@@ -75,11 +88,21 @@ class Cortex:
 
             if self.current_project:
 
-                self.current_project.update_progress(self.progress)
+                self.current_project.update_progress(
+                    self.progress
+                )
+
+                self.current_project.add_activity(
+                    f"Progress updated: {self.progress}%"
+                )
 
                 if self.progress == 100:
 
                     self.current_project.status = "Completed"
+
+                    self.current_project.add_activity(
+                        "Goal completed"
+                    )
 
                 self.projects.save()
 
@@ -96,6 +119,13 @@ class Cortex:
         if project:
 
             self.current_project = project
+
+            project.add_activity(
+                "Project activated"
+            )
+
+            self.projects.save()
+
             return True
 
         return False
@@ -116,6 +146,10 @@ class Cortex:
 
         self.current_project.add_note(note)
 
+        self.current_project.add_activity(
+            f"Note added: {note}"
+        )
+
         self.projects.save()
 
         return True
@@ -127,6 +161,32 @@ class Cortex:
             return []
 
         return self.current_project.get_notes()
+
+    # ---------------------------------
+    # Activity
+    # ---------------------------------
+
+    def add_activity(self, activity):
+
+        if self.current_project is None:
+
+            return False
+
+        self.current_project.add_activity(
+            activity
+        )
+
+        self.projects.save()
+
+        return True
+
+    def get_activity(self):
+
+        if self.current_project is None:
+
+            return []
+
+        return self.current_project.get_activity()
 
     # ---------------------------------
     # Existing getters

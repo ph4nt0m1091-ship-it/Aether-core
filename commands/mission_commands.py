@@ -22,9 +22,7 @@ class MissionCommands:
 
             if not missions:
 
-                return (
-                    "Aether: I don't currently have any missions."
-                )
+                return "Aether: I don't currently have any missions."
 
             return (
                 "Aether: I currently know these missions:\n\n- "
@@ -37,23 +35,53 @@ class MissionCommands:
 
         if lower.startswith("run mission "):
 
-            goal = message[len("run mission "):].strip()
+            mission_name = message[len("run mission "):].strip()
 
-            if not goal:
+            if not mission_name:
 
                 return "Aether: Please provide a mission."
 
-            task = brain.planner.create_task(goal)
+            # Find the mission task
+            task = brain.planner.create_task(mission_name)
 
             if task is None:
 
                 return (
                     f'Aether: I don\'t know how to run '
-                    f'the mission "{goal}".'
+                    f'the mission "{mission_name}".'
                 )
 
-            brain.executor.execute(task)
+            # ----------------------------
+            # Create / activate project
+            # ----------------------------
 
-            return "Aether: Mission finished."
+            project_name = mission_name
+
+            if mission_name.lower() == "start robotics project":
+
+                project_name = "robotics"
+
+            project = brain.cortex.projects.create_project(
+                project_name
+            )
+
+            brain.cortex.current_project = project
+
+            project.set_goal(mission_name)
+
+            project.status = "Active"
+
+            brain.cortex.projects.save()
+
+            # ----------------------------
+            # Execute mission
+            # ----------------------------
+
+            brain.executor.execute(task, brain.cortex)
+
+            return (
+                f'Aether: Mission "{mission_name}" finished.\n'
+                f'Project "{project.name}" is now active.'
+            )
 
         return None

@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 class Project:
     """
     Represents one long-term project.
@@ -16,6 +19,8 @@ class Project:
         self.notes = []
 
         self.tags = []
+
+        self.activity = []
 
     # -----------------------------
     # Goal
@@ -60,3 +65,28 @@ class Project:
         if tag and tag not in self.tags:
 
             self.tags.append(tag)
+
+    # -----------------------------
+    # Activity
+    # -----------------------------
+
+    def add_activity(self, activity):
+
+        activity = activity.strip()
+
+        if not activity:
+
+            return
+
+        event = {
+            "timestamp": datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "message": activity
+        }
+
+        self.activity.append(event)
+
+    def get_activity(self):
+
+        return self.activity

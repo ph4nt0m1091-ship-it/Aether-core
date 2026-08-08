@@ -5,7 +5,8 @@
         "status": "Active",
         "progress": 25,
         "notes": [],
-        "tags": []
+        "tags": [],
+        "activity": []
     },
     {
         "name": "electronics",
@@ -13,9 +14,24 @@
         "status": "Active",
         "progress": 0,
         "notes": [
+            "Research motor drivers",
             "Research motor drivers"
         ],
-        "tags": []
+        "tags": [],
+        "activity": [
+            {
+                "timestamp": "Unknown",
+                "message": "Project activated"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Note added: Research motor drivers"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Project activated"
+            }
+        ]
     },
     {
         "name": "coding",
@@ -23,6 +39,75 @@
         "status": "Active",
         "progress": 0,
         "notes": [],
-        "tags": []
+        "tags": [],
+        "activity": []
+    },
+    {
+        "name": "robotics",
+        "goal": "Start Robotics Project",
+        "status": "Completed",
+        "progress": 100,
+        "notes": [],
+        "tags": [],
+        "activity": [
+            {
+                "timestamp": "Unknown",
+                "message": "Project activated"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Project activated"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission started: Start Robotics Project"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission step completed: file : create_folder"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission step completed: file : create_file"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission step completed: file : create_file"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission step completed: file : create_file"
+            },
+            {
+                "timestamp": "Unknown",
+                "message": "Mission completed: Start Robotics Project"
+            },
+            {
+                "timestamp": "2026-08-08 01:57:18",
+                "message": "Project activated"
+            },
+            {
+                "timestamp": "2026-08-08 02:00:48",
+                "message": "Project activated"
+            },
+            {
+                "timestamp": "2026-08-08 02:19:13",
+                "message": "Project activated"
+            }
+        ]
+    },
+    {
+        "name": "test",
+        "goal": "",
+        "status": "Active",
+        "progress": 0,
+        "notes": [],
+        "tags": [],
+        "activity": [
+            {
+                "timestamp": "2026-08-08 01:54:08",
+                "message": "Project created"
+            }
+        ]
     }
 ]
