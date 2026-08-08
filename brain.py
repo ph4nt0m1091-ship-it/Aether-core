@@ -8,6 +8,7 @@ from commands.command_router import CommandRouter
 from commands.project_commands import ProjectCommands
 from commands.goal_commands import GoalCommands
 from commands.note_commands import NoteCommands
+from commands.mission_commands import MissionCommands
 
 
 class Brain:
@@ -45,6 +46,7 @@ class Brain:
         self.router.register(ProjectCommands())
         self.router.register(GoalCommands())
         self.router.register(NoteCommands())
+        self.router.register(MissionCommands())
 
     # ----------------------------
     # Main Thought Cycle
@@ -73,30 +75,6 @@ class Brain:
         # ----------------------------
 
         lower = message.lower().rstrip("?")
-
-        # ----------------------------
-        # Mission Awareness
-        # ----------------------------
-
-        if lower in (
-            "what missions do you know",
-            "what missions do you have",
-            "list missions",
-            "show missions"
-        ):
-
-            missions = self.planner.available_missions()
-
-            if not missions:
-
-                return (
-                    "Aether: I don't currently have any missions."
-                )
-
-            return (
-                "Aether: I currently know these missions:\n\n- "
-                + "\n- ".join(missions)
-            )
 
         # ----------------------------
         # Skill Awareness
@@ -182,23 +160,7 @@ class Brain:
             )
 
         # ----------------------------
-        # Mission Execution
-        # ----------------------------
-
-        intent = self.intent.analyze(message)
-
-        if intent == "mission":
-
-            task = self.planner.create_task(message)
-
-            if task:
-
-                self.executor.execute(task)
-
-                return "Aether: Mission finished."
-
-        # ----------------------------
-        # Skills / Normal Conversation
+        # Normal Skills
         # ----------------------------
 
         response = self.skill_manager.handle(message)
