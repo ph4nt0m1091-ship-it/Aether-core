@@ -1,0 +1,49 @@
+from skills.greeting_skill import GreetingSkill
+from skills.memory_skill import MemorySkill
+from skills.time_skill import TimeSkill
+from skills.calculator_skill import CalculatorSkill
+from skills.file_skill import FileSkill
+
+
+class SkillRegistry:
+    """
+    Stores and manages all of Aether's skills.
+    """
+
+    def __init__(self, memory):
+
+        self.skills = [
+            GreetingSkill(memory),
+            MemorySkill(memory),
+            TimeSkill(memory),
+            CalculatorSkill(memory),
+            FileSkill(memory)
+        ]
+
+    def handle(self, message):
+
+        for skill in self.skills:
+
+            response = skill.handle(message)
+
+            if response is not None:
+                return response
+
+        return None
+
+    def execute(self, step):
+
+        for skill in self.skills:
+
+            if skill.name == step["skill"]:
+
+                return skill.execute(step)
+
+        return None
+
+    def available_skills(self):
+        """
+        Returns the names of every registered skill.
+        """
+
+        return [skill.name for skill in self.skills]
