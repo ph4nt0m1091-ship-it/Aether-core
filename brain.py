@@ -9,6 +9,7 @@ from commands.project_commands import ProjectCommands
 from commands.goal_commands import GoalCommands
 from commands.note_commands import NoteCommands
 from commands.mission_commands import MissionCommands
+from commands.reasoning_commands import ReasoningCommands
 
 
 class Brain:
