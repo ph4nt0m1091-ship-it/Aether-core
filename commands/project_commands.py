@@ -43,7 +43,6 @@ class ProjectCommands:
                 return "Aether: No active project."
 
             activity = project.get_activity()
-
             notes = project.get_notes()
 
             output = (
@@ -87,7 +86,7 @@ class ProjectCommands:
 
             return output
 
-                # ----------------------------
+        # ----------------------------
         # Project Summary
         # ----------------------------
 
@@ -112,54 +111,30 @@ class ProjectCommands:
                 f'{project.name}\n\n'
             )
 
-            # ----------------------------
-            # Goal
-            # ----------------------------
-
             output += (
                 f'Goal: '
                 f'{project.goal or "None"}\n'
             )
-
-            # ----------------------------
-            # Status
-            # ----------------------------
 
             output += (
                 f'Status: '
                 f'{project.status}\n'
             )
 
-            # ----------------------------
-            # Progress
-            # ----------------------------
-
             output += (
                 f'Progress: '
                 f'{project.progress}%\n'
             )
-
-            # ----------------------------
-            # Notes
-            # ----------------------------
 
             output += (
                 f'Notes: '
                 f'{len(notes)}\n'
             )
 
-            # ----------------------------
-            # Activity
-            # ----------------------------
-
             output += (
                 f'Activity: '
                 f'{len(activity)} events\n'
             )
-
-            # ----------------------------
-            # Last Activity
-            # ----------------------------
 
             if activity:
 
@@ -191,10 +166,6 @@ class ProjectCommands:
                         f'{last_event}\n'
                     )
 
-            # ----------------------------
-            # Completion Message
-            # ----------------------------
-
             if project.progress >= 100:
 
                 output += (
@@ -214,6 +185,87 @@ class ProjectCommands:
                 )
 
             return output
+
+        # ----------------------------
+        # What's Next
+        # ----------------------------
+
+        if lower in (
+            "what's next",
+            "whats next",
+            "what is next",
+            "next step",
+            "what should i do next"
+        ):
+
+            project = brain.cortex.get_current_project()
+
+            if project is None:
+
+                return "Aether: No active project."
+
+            plan = brain.cortex.get_plan()
+
+            if plan is None:
+
+                return (
+                    f'Aether: Project "{project.name}" '
+                    f'does not have an active plan.'
+                )
+
+            steps = plan.list_steps()
+
+            if not steps:
+
+                return (
+                    f'Aether: Project "{project.name}" '
+                    f'does not have any planned steps.'
+                )
+
+            # ----------------------------
+            # Find First Incomplete Step
+            # ----------------------------
+
+            next_step = None
+            next_index = None
+
+            for index, step in enumerate(
+                steps,
+                start=1
+            ):
+
+                if not step["completed"]:
+
+                    next_step = step
+                    next_index = index
+                    break
+
+            # ----------------------------
+            # No Remaining Steps
+            # ----------------------------
+
+            if next_step is None:
+
+                return (
+                    f'Aether: There are no remaining '
+                    f'steps for "{project.name}".\n\n'
+                    f'Progress: {project.progress}%\n'
+                    f'Project is complete.'
+                )
+
+            # ----------------------------
+            # Remaining Step
+            # ----------------------------
+
+            return (
+                f'Aether: Next step for '
+                f'"{project.name}":\n\n'
+                f'{next_index}. '
+                f'{next_step["description"]}\n\n'
+                f'Progress: {project.progress}%\n\n'
+                f'You can say:\n'
+                f'"complete step {next_index}"'
+            )
 
         # ----------------------------
         # Switch Project

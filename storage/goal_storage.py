@@ -33,20 +33,10 @@ class GoalStorage:
             return json.load(file)
 
     def restore(self, cortex):
-
+        """Restore Cortex state from storage."""
         data = self.load()
-
         if data is None:
             return
 
-        cortex.current_goal = data["goal"]
-        cortex.goal_status = data["status"]
-        cortex.progress = data["progress"]
-
-        cortex.plan = cortex.factory.create_plan(
-            cortex.current_goal
-        )
-
-        for i, step in enumerate(data["steps"]):
-
-            cortex.plan.steps[i]["completed"] = step["completed"]
+        # Let the Cortex object restore itself from the data
+        cortex.restore(data)

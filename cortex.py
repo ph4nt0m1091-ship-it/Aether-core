@@ -1,6 +1,7 @@
 from planners.planner_factory import PlannerFactory
 from storage.goal_storage import GoalStorage
 from projects.manager import ProjectManager
+from plan import Plan
 
 
 class Cortex:
@@ -20,6 +21,33 @@ class Cortex:
 
         self.factory = PlannerFactory()
         self.storage = GoalStorage()
+
+    # ---------------------------------
+    # RESTORE (NEW)
+    # ---------------------------------
+
+    def restore(self, data):
+        """Restore Cortex state from saved data."""
+
+        if data is None:
+            return
+
+        self.current_goal = data.get("goal")
+        self.goal_status = data.get("status", "Idle")
+        self.progress = data.get("progress", 0)
+
+        # Rebuild the plan from stored steps
+        plan_data = data.get("steps", [])
+        if self.current_goal and plan_data:
+            self.plan = Plan(self.current_goal)
+            # Restore the exact steps and their completion status
+            for step in plan_data:
+                self.plan.add_step(step["description"])
+                if step.get("completed", False):
+                    # Mark the last added step as complete
+                    self.plan.steps[-1]["completed"] = True
+        else:
+            self.plan = None
 
     # ---------------------------------
     # Goals
