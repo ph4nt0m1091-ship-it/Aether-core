@@ -1,6 +1,8 @@
 import json
 import os
 
+from plan import Plan
+
 
 class ProjectStorage:
     """
@@ -9,13 +11,17 @@ class ProjectStorage:
 
     FILE = "storage/projects.json"
 
+    # -----------------------------
+    # Save
+    # -----------------------------
+
     def save(self, project_manager):
 
         data = []
 
         for project in project_manager.list_projects():
 
-            data.append({
+            project_data = {
 
                 "name": project.name,
 
@@ -29,9 +35,23 @@ class ProjectStorage:
 
                 "tags": project.tags,
 
-                "activity": project.activity
+                "activity": project.activity,
 
-            })
+                "plan": None
+            }
+
+            # -----------------------------
+            # Save Project Plan
+            # -----------------------------
+
+            if project.get_plan() is not None:
+
+                project_data["plan"] = {
+                    "goal": project.get_plan().goal,
+                    "steps": project.get_plan().steps
+                }
+
+            data.append(project_data)
 
         os.makedirs("storage", exist_ok=True)
 
@@ -42,6 +62,10 @@ class ProjectStorage:
                 file,
                 indent=4
             )
+
+    # -----------------------------
+    # Restore
+    # -----------------------------
 
     def restore(self, project_manager):
 
@@ -83,6 +107,46 @@ class ProjectStorage:
                 "tags",
                 []
             )
+
+            # -----------------------------
+            # Restore Project Plan
+            # -----------------------------
+
+            plan_data = item.get(
+                "plan"
+            )
+
+            if plan_data:
+
+                plan = Plan(
+                    plan_data.get(
+                        "goal",
+                        project.goal
+                    )
+                )
+
+                for step in plan_data.get(
+                    "steps",
+                    []
+                ):
+
+                    plan.add_step(
+                        step.get(
+                            "description",
+                            ""
+                        )
+                    )
+
+                    plan.steps[-1]["completed"] = step.get(
+                        "completed",
+                        False
+                    )
+
+                project.set_plan(plan)
+
+            else:
+
+                project.set_plan(None)
 
             # -----------------------------
             # Activity Compatibility
