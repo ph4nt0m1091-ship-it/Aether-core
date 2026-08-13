@@ -5,7 +5,7 @@ class GoalCommands:
 
     def handle(self, brain, message):
 
-        lower = message.lower().rstrip("?")
+        lower = message.lower().strip().rstrip("?")
 
         # ----------------------------
         # Build Goal
@@ -15,9 +15,27 @@ class GoalCommands:
 
             goal = message[6:].strip()
 
+            if not goal:
+                return "Aether: Please tell me what you want to build."
+
             brain.cortex.set_goal(goal)
 
-            return "Aether: Goal added to Cortex."
+            return f"Aether: Goal added to Cortex: {goal}"
+
+        # ----------------------------
+        # Set Goal
+        # ----------------------------
+
+        if lower.startswith("set goal "):
+
+            goal = message[9:].strip()
+
+            if not goal:
+                return "Aether: Please tell me what the goal should be."
+
+            brain.cortex.set_goal(goal)
+
+            return f"Aether: Goal added to Cortex: {goal}"
 
         # ----------------------------
         # Show Plan

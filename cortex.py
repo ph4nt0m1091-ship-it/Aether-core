@@ -23,7 +23,7 @@ class Cortex:
         self.storage = GoalStorage()
 
     # ---------------------------------
-    # RESTORE (NEW)
+    # RESTORE
     # ---------------------------------
 
     def restore(self, data):
@@ -36,17 +36,24 @@ class Cortex:
         self.goal_status = data.get("status", "Idle")
         self.progress = data.get("progress", 0)
 
-        # Rebuild the plan from stored steps
         plan_data = data.get("steps", [])
+
         if self.current_goal and plan_data:
+
             self.plan = Plan(self.current_goal)
-            # Restore the exact steps and their completion status
+
             for step in plan_data:
-                self.plan.add_step(step["description"])
+
+                self.plan.add_step(
+                    step["description"]
+                )
+
                 if step.get("completed", False):
-                    # Mark the last added step as complete
+
                     self.plan.steps[-1]["completed"] = True
+
         else:
+
             self.plan = None
 
     # ---------------------------------
@@ -62,12 +69,24 @@ class Cortex:
 
         self.progress = self.plan.progress()
 
+        # ---------------------------------
+        # Create / get project
+        # ---------------------------------
+
         project = self.projects.create_project(goal)
 
         project.set_goal(goal)
 
         project.update_progress(
             self.progress
+        )
+
+        # IMPORTANT:
+        # Attach Cortex's plan to the project
+        # so ProjectStorage can persist it.
+
+        project.set_plan(
+            self.plan
         )
 
         project.add_activity(
@@ -80,61 +99,83 @@ class Cortex:
 
         self.storage.save(self)
 
+    # ---------------------------------
+    # Plan Steps
+    # ---------------------------------
+
     def add_step(self, step):
 
-        if self.plan:
+        if self.plan is None:
 
-            self.plan.add_step(step)
+            return
 
-            self.progress = self.plan.progress()
+        self.plan.add_step(step)
 
-            if self.current_project:
+        self.progress = self.plan.progress()
 
-                self.current_project.update_progress(
-                    self.progress
-                )
+        if self.current_project:
 
-                self.current_project.add_activity(
-                    f"Plan step added: {step}"
-                )
+            # Keep project plan synchronized
+            self.current_project.set_plan(
+                self.plan
+            )
 
-                self.projects.save()
+            self.current_project.update_progress(
+                self.progress
+            )
 
-            self.storage.save(self)
+            self.current_project.add_activity(
+                f"Plan step added: {step}"
+            )
+
+            self.projects.save()
+
+        self.storage.save(self)
+
+    # ---------------------------------
+    # Complete Step
+    # ---------------------------------
 
     def complete_step(self, index):
 
-        if self.plan:
+        if self.plan is None:
 
-            self.plan.complete_step(index)
+            return
 
-            self.progress = self.plan.progress()
+        self.plan.complete_step(index)
+
+        self.progress = self.plan.progress()
+
+        if self.progress == 100:
+
+            self.goal_status = "Completed"
+
+        if self.current_project:
+
+            # Keep project plan synchronized
+            self.current_project.set_plan(
+                self.plan
+            )
+
+            self.current_project.update_progress(
+                self.progress
+            )
+
+            self.current_project.add_activity(
+                f"Progress updated: {self.progress}%"
+            )
 
             if self.progress == 100:
 
-                self.goal_status = "Completed"
-
-            if self.current_project:
-
-                self.current_project.update_progress(
-                    self.progress
-                )
+                self.current_project.status = "Completed"
 
                 self.current_project.add_activity(
-                    f"Progress updated: {self.progress}%"
+                    "Goal completed"
                 )
 
-                if self.progress == 100:
+            self.projects.save()
 
-                    self.current_project.status = "Completed"
-
-                    self.current_project.add_activity(
-                        "Goal completed"
-                    )
-
-                self.projects.save()
-
-            self.storage.save(self)
+        self.storage.save(self)
 
     # ---------------------------------
     # Active Workspace
@@ -147,6 +188,34 @@ class Cortex:
         if project:
 
             self.current_project = project
+
+            # ---------------------------------
+            # Restore project's plan
+            # ---------------------------------
+
+            if project.get_plan() is not None:
+
+                self.plan = project.get_plan()
+
+                self.current_goal = project.goal
+
+                self.progress = project.progress
+
+                self.goal_status = (
+                    "Completed"
+                    if project.status == "Completed"
+                    else "Active"
+                )
+
+            else:
+
+                self.plan = None
+
+                self.current_goal = project.goal
+
+                self.progress = project.progress
+
+                self.goal_status = project.status
 
             project.add_activity(
                 "Project activated"
@@ -217,7 +286,7 @@ class Cortex:
         return self.current_project.get_activity()
 
     # ---------------------------------
-    # Existing getters
+    # Existing Getters
     # ---------------------------------
 
     def get_goal(self):
