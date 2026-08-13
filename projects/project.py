@@ -22,6 +22,12 @@ class Project:
 
         self.activity = []
 
+        # -----------------------------
+        # Project Plan
+        # -----------------------------
+
+        self.plan = None
+
     # -----------------------------
     # Goal
     # -----------------------------
@@ -37,6 +43,18 @@ class Project:
     def update_progress(self, progress):
 
         self.progress = progress
+
+    # -----------------------------
+    # Plan
+    # -----------------------------
+
+    def set_plan(self, plan):
+
+        self.plan = plan
+
+    def get_plan(self):
+
+        return self.plan
 
     # -----------------------------
     # Notes

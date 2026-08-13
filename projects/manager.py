@@ -38,6 +38,22 @@ class ProjectManager:
         return self.projects[name]
 
     # -----------------------------
+    # Restore Project
+    # -----------------------------
+
+    def restore_project(self, name):
+
+        name = name.strip().lower()
+
+        if name not in self.projects:
+
+            project = Project(name)
+
+            self.projects[name] = project
+
+        return self.projects[name]
+
+    # -----------------------------
     # Get Project
     # -----------------------------
 

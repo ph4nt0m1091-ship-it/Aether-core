@@ -55,7 +55,7 @@ class ProjectStorage:
 
         for item in data:
 
-            project = project_manager.create_project(
+            project = project_manager.restore_project(
                 item["name"]
             )
 
