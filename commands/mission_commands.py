@@ -1,87 +1,180 @@
 class MissionCommands:
     """
-    Handles mission-related commands.
+    Handles goals, plans, and mission progress.
     """
 
     def handle(self, brain, message):
 
-        lower = message.lower().rstrip("?")
+        message = message.strip()
+        lower = message.lower().rstrip("?").strip()
 
-        # ----------------------------
-        # Show Available Missions
-        # ----------------------------
+        # ---------------------------------
+        # SET GOAL
+        # ---------------------------------
 
-        if lower in (
-            "what missions do you know",
-            "what missions do you have",
-            "list missions",
-            "show missions"
-        ):
+        if lower.startswith("set goal "):
 
-            missions = brain.planner.available_missions()
+            goal = message[len("set goal "):].strip()
 
-            if not missions:
-
-                return "Aether: I don't currently have any missions."
-
-            return (
-                "Aether: I currently know these missions:\n\n- "
-                + "\n- ".join(missions)
-            )
-
-        # ----------------------------
-        # Run Mission
-        # ----------------------------
-
-        if lower.startswith("run mission "):
-
-            mission_name = message[len("run mission "):].strip()
-
-            if not mission_name:
-
-                return "Aether: Please provide a mission."
-
-            # Find the mission task
-            task = brain.planner.create_task(mission_name)
-
-            if task is None:
-
+            if not goal:
                 return (
-                    f'Aether: I don\'t know how to run '
-                    f'the mission "{mission_name}".'
+                    "Aether: Please tell me what the goal is."
                 )
 
-            # ----------------------------
-            # Create / activate project
-            # ----------------------------
+            success = brain.cortex.set_goal(goal)
 
-            project_name = mission_name
-
-            if mission_name.lower() == "start robotics project":
-
-                project_name = "robotics"
-
-            project = brain.cortex.projects.create_project(
-                project_name
-            )
-
-            brain.cortex.current_project = project
-
-            project.set_goal(mission_name)
-
-            project.status = "Active"
-
-            brain.cortex.projects.save()
-
-            # ----------------------------
-            # Execute mission
-            # ----------------------------
-
-            brain.executor.execute(task, brain.cortex)
+            if not success:
+                return (
+                    "Aether: I couldn't create that goal."
+                )
 
             return (
-                f'Aether: Mission "{mission_name}" finished.\n'
-                f'Project "{project.name}" is now active.'
+                f"Aether: Goal added to Cortex: {goal}"
             )
+
+        # ---------------------------------
+        # BUILD GOAL
+        # ---------------------------------
+
+        if lower.startswith("build "):
+
+            goal = message[len("build "):].strip()
+
+            if not goal:
+                return (
+                    "Aether: Please tell me what you want to build."
+                )
+
+            success = brain.cortex.set_goal(goal)
+
+            if not success:
+                return (
+                    "Aether: I couldn't create that goal."
+                )
+
+            return (
+                f"Aether: Goal added to Cortex: {goal}"
+            )
+
+        # ---------------------------------
+        # SHOW PLAN
+        # ---------------------------------
+
+        if lower == "show plan":
+
+            project = brain.cortex.get_current_project()
+
+            if project is None:
+                return (
+                    "Aether: No active project. "
+                    "Switch to a project first."
+                )
+
+            plan = project.get_plan()
+
+            if plan is None:
+                return (
+                    f'Aether: Project "{project.name}" '
+                    "does not have an active plan."
+                )
+
+            output = (
+                f"Goal: {plan.goal}\n\n"
+                "Plan:\n"
+            )
+
+            for i, step in enumerate(plan.steps, start=1):
+
+                mark = "✓" if step["completed"] else "□"
+
+                output += (
+                    f"{mark} {i}. "
+                    f"{step['description']}\n"
+                )
+
+            output += (
+                f"\nProgress: {plan.progress()}%"
+            )
+
+            return output
+
+        # ---------------------------------
+        # WHAT'S NEXT
+        # ---------------------------------
+
+        if lower in (
+            "what's next",
+            "whats next",
+            "next step",
+            "what should i do next"
+        ):
+
+            project = brain.cortex.get_current_project()
+
+            if project is None:
+                return (
+                    "Aether: No active project. "
+                    "Switch to a project first."
+                )
+
+            plan = project.get_plan()
+
+            if plan is None:
+                return (
+                    f'Aether: Project "{project.name}" '
+                    "does not have an active plan."
+                )
+
+            for i, step in enumerate(plan.steps, start=1):
+
+                if not step["completed"]:
+
+                    return (
+                        f'Aether: Next step for "{plan.goal}":\n\n'
+                        f'{i}. {step["description"]}\n\n'
+                        f'Progress: {plan.progress()}%\n\n'
+                        f'You can say:\n'
+                        f'"complete step {i}"'
+                    )
+
+            return (
+                f'Aether: All steps for "{plan.goal}" are complete!'
+            )
+
+        # ---------------------------------
+        # COMPLETE STEP
+        # ---------------------------------
+
+        if lower.startswith("complete step"):
+
+            try:
+
+                parts = lower.split()
+
+                if len(parts) < 3:
+                    return (
+                        "Aether: Please specify which step to complete."
+                    )
+
+                index = int(parts[-1]) - 1
+
+                success = brain.cortex.complete_step(index)
+
+                if not success:
+                    return (
+                        "Aether: I can't complete that step because "
+                        "there is no active plan or the step number "
+                        "is invalid."
+                    )
+
+                return (
+                    f"Aether: Step {index + 1} completed."
+                )
+
+            except ValueError:
+
+                return (
+                    "Aether: Invalid step number."
+                )
 
         return None

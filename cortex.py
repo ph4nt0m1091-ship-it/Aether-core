@@ -7,6 +7,13 @@ from plan import Plan
 class Cortex:
     """
     Aether's executive reasoning system.
+
+    Cortex manages:
+    - Goals
+    - Plans
+    - Progress
+    - Current project
+    - Project workspace state
     """
 
     def __init__(self):
@@ -27,95 +34,161 @@ class Cortex:
     # ---------------------------------
 
     def restore(self, data):
-        """Restore Cortex state from saved data."""
+        """
+        Restore Cortex state from saved goal data.
+        """
 
         if data is None:
             return
 
-        self.current_goal = data.get("goal")
-        self.goal_status = data.get("status", "Idle")
-        self.progress = data.get("progress", 0)
+        self.current_goal = data.get(
+            "goal"
+        )
 
-        plan_data = data.get("steps", [])
+        self.goal_status = data.get(
+            "status",
+            "Idle"
+        )
+
+        self.progress = data.get(
+            "progress",
+            0
+        )
+
+        plan_data = data.get(
+            "steps",
+            []
+        )
 
         if self.current_goal and plan_data:
 
-            self.plan = Plan(self.current_goal)
+            self.plan = Plan(
+                self.current_goal
+            )
 
             for step in plan_data:
 
                 self.plan.add_step(
-                    step["description"]
+                    step.get(
+                        "description",
+                        ""
+                    )
                 )
 
-                if step.get("completed", False):
-
-                    self.plan.steps[-1]["completed"] = True
+                self.plan.steps[-1]["completed"] = (
+                    step.get(
+                        "completed",
+                        False
+                    )
+                )
 
         else:
 
             self.plan = None
+
+        # ---------------------------------
+        # Reconnect restored plan to project
+        # ---------------------------------
+
+        if self.current_goal:
+
+            project = self.projects.get_project(
+                self.current_goal
+            )
+
+            if project is not None:
+
+                self.current_project = project
+
+                project.set_goal(
+                    self.current_goal
+                )
+
+                project.set_plan(
+                    self.plan
+                )
+
+                project.update_progress(
+                    self.progress
+                )
 
     # ---------------------------------
     # Goals
     # ---------------------------------
 
     def set_goal(self, goal):
+        """
+        Create a goal and attach its plan
+        directly to the current project.
+        """
+
+        goal = goal.strip()
+
+        if not goal:
+
+            return False
 
         self.current_goal = goal
         self.goal_status = "Active"
 
-        self.plan = self.factory.create_plan(goal)
+        self.plan = self.factory.create_plan(
+            goal
+        )
 
         self.progress = self.plan.progress()
 
-        # ---------------------------------
-        # Create / get project
-        # ---------------------------------
-
-        project = self.projects.create_project(goal)
-
-        project.set_goal(goal)
-
-        project.update_progress(
-            self.progress
+        project = self.projects.create_project(
+            goal
         )
 
-        # IMPORTANT:
-        # Attach Cortex's plan to the project
-        # so ProjectStorage can persist it.
+        project.set_goal(
+            goal
+        )
 
         project.set_plan(
             self.plan
+        )
+
+        project.update_progress(
+            self.progress
         )
 
         project.add_activity(
             f"Goal set: {goal}"
         )
 
+        project.add_activity(
+            "Project plan created"
+        )
+
         self.current_project = project
 
         self.projects.save()
 
-        self.storage.save(self)
+        self.storage.save(
+            self
+        )
+
+        return True
 
     # ---------------------------------
-    # Plan Steps
+    # Add Step
     # ---------------------------------
 
     def add_step(self, step):
 
         if self.plan is None:
 
-            return
+            return False
 
-        self.plan.add_step(step)
+        self.plan.add_step(
+            step
+        )
 
         self.progress = self.plan.progress()
 
         if self.current_project:
 
-            # Keep project plan synchronized
             self.current_project.set_plan(
                 self.plan
             )
@@ -130,19 +203,42 @@ class Cortex:
 
             self.projects.save()
 
-        self.storage.save(self)
+        self.storage.save(
+            self
+        )
+
+        return True
 
     # ---------------------------------
     # Complete Step
     # ---------------------------------
 
     def complete_step(self, index):
+        """
+        Complete one plan step.
+
+        Returns:
+            True  = successful
+            False = no plan or invalid step
+        """
 
         if self.plan is None:
 
-            return
+            return False
 
-        self.plan.complete_step(index)
+        if index < 0:
+
+            return False
+
+        if index >= len(
+            self.plan.steps
+        ):
+
+            return False
+
+        self.plan.complete_step(
+            index
+        )
 
         self.progress = self.plan.progress()
 
@@ -152,7 +248,6 @@ class Cortex:
 
         if self.current_project:
 
-            # Keep project plan synchronized
             self.current_project.set_plan(
                 self.plan
             )
@@ -162,12 +257,14 @@ class Cortex:
             )
 
             self.current_project.add_activity(
-                f"Progress updated: {self.progress}%"
+                f"Plan step completed: {index + 1}"
             )
 
             if self.progress == 100:
 
-                self.current_project.status = "Completed"
+                self.current_project.status = (
+                    "Completed"
+                )
 
                 self.current_project.add_activity(
                     "Goal completed"
@@ -175,57 +272,63 @@ class Cortex:
 
             self.projects.save()
 
-        self.storage.save(self)
+        self.storage.save(
+            self
+        )
+
+        return True
 
     # ---------------------------------
     # Active Workspace
     # ---------------------------------
 
     def switch_project(self, name):
+        """
+        Switch to an existing project.
 
-        project = self.projects.get_project(name)
+        Reconnect Cortex to the project's
+        saved goal and plan.
+        """
 
-        if project:
+        project = self.projects.get_project(
+            name
+        )
 
-            self.current_project = project
+        if project is None:
 
-            # ---------------------------------
-            # Restore project's plan
-            # ---------------------------------
+            return False
 
-            if project.get_plan() is not None:
+        self.current_project = project
 
-                self.plan = project.get_plan()
+        self.current_goal = project.goal
 
-                self.current_goal = project.goal
+        self.plan = project.get_plan()
 
-                self.progress = project.progress
+        self.progress = project.progress
 
-                self.goal_status = (
-                    "Completed"
-                    if project.status == "Completed"
-                    else "Active"
-                )
+        if project.status == "Completed":
 
-            else:
+            self.goal_status = "Completed"
 
-                self.plan = None
+        elif project.goal:
 
-                self.current_goal = project.goal
+            self.goal_status = "Active"
 
-                self.progress = project.progress
+        else:
 
-                self.goal_status = project.status
+            self.goal_status = "Idle"
 
-            project.add_activity(
-                "Project activated"
-            )
+        project.add_activity(
+            "Project activated"
+        )
 
-            self.projects.save()
+        self.projects.save()
 
-            return True
+        return True
 
-        return False
+    # ---------------------------------
+    # Current Project
+    # ---------------------------------
 
     def get_current_project(self):
 
@@ -241,7 +344,9 @@ class Cortex:
 
             return False
 
-        self.current_project.add_note(note)
+        self.current_project.add_note(
+            note
+        )
 
         self.current_project.add_activity(
             f"Note added: {note}"
@@ -286,7 +391,7 @@ class Cortex:
         return self.current_project.get_activity()
 
     # ---------------------------------
-    # Existing Getters
+    # Getters
     # ---------------------------------
 
     def get_goal(self):
