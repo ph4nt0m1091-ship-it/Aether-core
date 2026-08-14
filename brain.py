@@ -78,6 +78,14 @@ class Brain:
             )
 
         # ----------------------------
+        # Analyze Intent
+        # ----------------------------
+
+        intent = self.intent.analyze(
+            message
+        )
+
+        # ----------------------------
         # Command Router
         # ----------------------------
 
@@ -111,7 +119,8 @@ class Brain:
         ):
 
             skills = (
-                self.skill_manager.registry
+                self.skill_manager
+                .registry
                 .describe_skills()
             )
 
@@ -215,6 +224,20 @@ class Brain:
             return (
                 f'Aether: Project '
                 f'"{project.name}" created.'
+            )
+
+        # ----------------------------
+        # Capability Request
+        # ----------------------------
+
+        if intent == "capability_request":
+
+            return (
+                "Aether: I don't currently have "
+                "a skill for that capability."
+                "\n\n"
+                "Skill Lab status: "
+                "skill gap detected."
             )
 
         # ----------------------------
