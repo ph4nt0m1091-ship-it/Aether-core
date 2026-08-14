@@ -8,6 +8,10 @@ class FileSkill:
 
     name = "file"
 
+    description = (
+        "Creates files and folders for Aether tasks and missions."
+    )
+
     def __init__(self, memory):
 
         self.memory = memory
@@ -27,8 +31,12 @@ class FileSkill:
 
         if action == "create_folder":
 
-            self.tool.create_folder(data["name"])
+            self.tool.create_folder(
+                data["name"]
+            )
 
         elif action == "create_file":
 
-            self.tool.create_file(data["filename"])
+            self.tool.create_file(
+                data["filename"]
+            )

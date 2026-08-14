@@ -8,6 +8,10 @@ class TimeSkill:
 
     name = "time"
 
+    description = (
+        "Provides the current time."
+    )
+
     def __init__(self, memory):
 
         self.memory = memory
@@ -25,7 +29,9 @@ class TimeSkill:
 
             current_time = self.clock.get_time()
 
-            return f"Aether: The current time is {current_time}."
+            return (
+                f"Aether: The current time is {current_time}."
+            )
 
         return None
 

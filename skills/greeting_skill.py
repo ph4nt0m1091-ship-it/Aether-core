@@ -5,6 +5,10 @@ class GreetingSkill:
 
     name = "greeting"
 
+    description = (
+        "Handles greetings and farewells."
+    )
+
     def __init__(self, memory):
 
         self.memory = memory
@@ -22,23 +26,39 @@ class GreetingSkill:
             "good evening"
         ]
 
-        if any(message.startswith(greeting) for greeting in greetings):
+        if any(
+            message.startswith(greeting)
+            for greeting in greetings
+        ):
 
             name = self.memory.get_name()
 
             if name:
-                return f"Aether: Hello, {name}! It's good to see you."
 
-            return "Aether: Hello! It's good to see you."
+                return (
+                    f"Aether: Hello, {name}! "
+                    f"It's good to see you."
+                )
+
+            return (
+                "Aether: Hello! "
+                "It's good to see you."
+            )
 
         if "good night" in message:
 
             name = self.memory.get_name()
 
             if name:
-                return f"Aether: Good night, {name}. Sleep well."
 
-            return "Aether: Good night. Sleep well."
+                return (
+                    f"Aether: Good night, {name}. "
+                    f"Sleep well."
+                )
+
+            return (
+                "Aether: Good night. Sleep well."
+            )
 
         return None
 

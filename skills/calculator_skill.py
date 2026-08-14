@@ -8,6 +8,10 @@ class CalculatorSkill:
 
     name = "calculator"
 
+    description = (
+        "Performs mathematical calculations."
+    )
+
     def __init__(self, memory):
 
         self.memory = memory
@@ -36,14 +40,24 @@ class CalculatorSkill:
         if expression is None:
             return None
 
-        expression = expression.replace("^", "**")
+        expression = expression.replace(
+            "^",
+            "**"
+        )
 
-        result = self.calculator.calculate(expression)
+        result = self.calculator.calculate(
+            expression
+        )
 
         if result is None:
-            return "Aether: I couldn't calculate that."
 
-        return f"Aether: The answer is {result}."
+            return (
+                "Aether: I couldn't calculate that."
+            )
+
+        return (
+            f"Aether: The answer is {result}."
+        )
 
     def execute(self, step):
         """

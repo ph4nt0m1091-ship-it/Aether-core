@@ -5,6 +5,10 @@ class MemorySkill:
 
     name = "memory"
 
+    description = (
+        "Retrieves information stored in Aether's memory."
+    )
+
     def __init__(self, memory):
 
         self.memory = memory
@@ -26,9 +30,14 @@ class MemorySkill:
             name = self.memory.get_name()
 
             if name:
-                return f"Aether: Your name is {name}."
 
-            return "Aether: I don't know your name yet."
+                return (
+                    f"Aether: Your name is {name}."
+                )
+
+            return (
+                "Aether: I don't know your name yet."
+            )
 
         # -------------------
         # FAVORITE COLOR
@@ -39,9 +48,14 @@ class MemorySkill:
             color = self.memory.get_favorite_color()
 
             if color:
-                return f"Aether: Your favorite color is {color}."
 
-            return "Aether: I don't know your favorite color yet."
+                return (
+                    f"Aether: Your favorite color is {color}."
+                )
+
+            return (
+                "Aether: I don't know your favorite color yet."
+            )
 
         # -------------------
         # DOG
@@ -52,9 +66,14 @@ class MemorySkill:
             dog = self.memory.get_dog_name()
 
             if dog:
-                return f"Aether: Your dog's name is {dog}."
 
-            return "Aether: I don't know your dog's name."
+                return (
+                    f"Aether: Your dog's name is {dog}."
+                )
+
+            return (
+                "Aether: I don't know your dog's name."
+            )
 
         # -------------------
         # LIKES
@@ -65,9 +84,16 @@ class MemorySkill:
             likes = self.memory.get_likes()
 
             if likes:
-                return "Aether: You like " + ", ".join(likes) + "."
 
-            return "Aether: I don't know what you like yet."
+                return (
+                    "Aether: You like "
+                    + ", ".join(likes)
+                    + "."
+                )
+
+            return (
+                "Aether: I don't know what you like yet."
+            )
 
         return None
 
