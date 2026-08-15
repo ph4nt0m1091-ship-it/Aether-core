@@ -4,6 +4,9 @@ from task_executor import TaskExecutor
 from skill_manager import SkillManager
 from cortex import Cortex
 
+from skill_lab.skill_gap import SkillGap
+from skill_lab.skill_gap_storage import SkillGapStorage
+
 from commands.command_router import CommandRouter
 from commands.project_commands import ProjectCommands
 from commands.goal_commands import GoalCommands
@@ -36,6 +39,8 @@ class Brain:
         self.skill_manager = SkillManager(
             memory
         )
+
+        self.skill_gap_storage = SkillGapStorage()
 
         self.executor = TaskExecutor(
             self.skill_manager
@@ -231,6 +236,28 @@ class Brain:
         # ----------------------------
 
         if intent == "capability_request":
+
+            capability = "unknown"
+
+            if (
+                "search the web" in lower
+                or "search web" in lower
+                or "web search" in lower
+                or "browse the web" in lower
+                or "browse web" in lower
+            ):
+
+                capability = "web_search"
+
+            gap = SkillGap(
+                request=message,
+                capability=capability,
+                status="unresolved"
+            )
+
+            self.skill_gap_storage.add(
+                gap
+            )
 
             return (
                 "Aether: I don't currently have "
