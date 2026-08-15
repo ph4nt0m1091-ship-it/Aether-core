@@ -76,7 +76,10 @@ class IntentAnalyzer:
             "what do i like",
             "hello",
             "hi",
-            "hey"
+            "hey",
+            "search the web for ",
+            "search web for ",
+            "search for "
         ]
 
         if any(
