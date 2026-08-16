@@ -3,86 +3,24 @@ from skills.memory_skill import MemorySkill
 from skills.time_skill import TimeSkill
 from skills.calculator_skill import CalculatorSkill
 from skills.file_skill import FileSkill
+from skills.web_search_skill import WebSearchSkill
 
 
 class SkillRegistry:
     """
-    Aether's Skill Lab registry.
-
-    Stores, discovers, and manages Aether's available skills.
+    Stores and manages all of Aether's skills.
     """
 
     def __init__(self, memory):
 
-        self.memory = memory
-
-        # ---------------------------------
-        # Skill Lab
-        # ---------------------------------
-
-        self.skills = []
-
-        self.register(
-            GreetingSkill(memory)
-        )
-
-        self.register(
-            MemorySkill(memory)
-        )
-
-        self.register(
-            TimeSkill(memory)
-        )
-
-        self.register(
-            CalculatorSkill(memory)
-        )
-
-        self.register(
-            FileSkill(memory)
-        )
-
-    # ---------------------------------
-    # REGISTER
-    # ---------------------------------
-
-    def register(self, skill):
-        """
-        Register a new skill with Aether.
-        """
-
-        if skill is None:
-            return False
-
-        if not hasattr(skill, "name"):
-            return False
-
-        for existing in self.skills:
-
-            if existing.name == skill.name:
-                return False
-
-        self.skills.append(skill)
-
-        return True
-
-    # ---------------------------------
-    # FIND
-    # ---------------------------------
-
-    def get_skill(self, name):
-        """
-        Find a skill by name.
-        """
-
-        name = name.lower().strip()
-
-        for skill in self.skills:
-
-            if skill.name.lower() == name:
-                return skill
-
-        return None
+        self.skills = [
+            GreetingSkill(memory),
+            MemorySkill(memory),
+            TimeSkill(memory),
+            CalculatorSkill(memory),
+            FileSkill(memory),
+            WebSearchSkill(memory)
+        ]
 
     # ---------------------------------
     # HANDLE
@@ -106,20 +44,13 @@ class SkillRegistry:
 
     def execute(self, step):
 
-        skill_name = step.get(
-            "skill"
-        )
+        for skill in self.skills:
 
-        skill = self.get_skill(
-            skill_name
-        )
+            if skill.name == step["skill"]:
 
-        if skill is None:
-            return None
+                return skill.execute(step)
 
-        return skill.execute(
-            step
-        )
+        return None
 
     # ---------------------------------
     # AVAILABLE SKILLS
@@ -127,8 +58,7 @@ class SkillRegistry:
 
     def available_skills(self):
         """
-        Return the names of every
-        registered skill.
+        Returns the names of every registered skill.
         """
 
         return [
@@ -137,28 +67,22 @@ class SkillRegistry:
         ]
 
     # ---------------------------------
-    # SKILL INFORMATION
+    # DESCRIBE SKILLS
     # ---------------------------------
 
     def describe_skills(self):
         """
-        Return basic capability information
-        about every registered skill.
+        Returns capability metadata for every skill.
         """
 
-        descriptions = []
-
-        for skill in self.skills:
-
-            description = getattr(
-                skill,
-                "description",
-                "No description available."
-            )
-
-            descriptions.append({
+        return [
+            {
                 "name": skill.name,
-                "description": description
-            })
-
-        return descriptions
+                "description": getattr(
+                    skill,
+                    "description",
+                    "No description available."
+                )
+            }
+            for skill in self.skills
+        ]

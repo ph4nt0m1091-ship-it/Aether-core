@@ -155,6 +155,37 @@ class SkillGapStorage:
         return gap
 
     # ---------------------------------
+    # RESOLVE
+    # ---------------------------------
+
+    def resolve(self, capability, resolution):
+        """
+        Mark an unresolved Skill Gap as resolved.
+
+        Returns the resolved Skill Gap when found.
+        Returns None when no matching unresolved
+        capability exists.
+        """
+
+        gaps = self.load()
+
+        for gap in gaps:
+
+            if (
+                gap.capability == capability
+                and gap.status == "unresolved"
+            ):
+
+                gap.status = "resolved"
+                gap.resolution = resolution
+
+                self.save(gaps)
+
+                return gap
+
+        return None
+
+    # ---------------------------------
     # GET ALL
     # ---------------------------------
 

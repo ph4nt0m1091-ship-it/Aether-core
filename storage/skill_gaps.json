@@ -2,6 +2,13 @@
     {
         "request": "search the web for motor drivers",
         "capability": "web_search",
+        "status": "resolved",
+        "resolution": "web_search_skill",
+        "created_at": null
+    },
+    {
+        "request": "search the web for motor drivers",
+        "capability": "web_search",
         "status": "unresolved",
         "resolution": null,
         "created_at": null
