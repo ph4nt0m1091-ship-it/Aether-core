@@ -3,20 +3,20 @@ from tools.web_search_tool import WebSearchTool
 
 class WebSearchSkill:
     """
-    Handles web search requests for Aether.
+    Handles web search and web research requests for Aether.
     """
 
     name = "web_search"
 
     description = (
-        "Searches the web for information."
+        "Searches the web for information and "
+        "returns an answer with supporting sources."
     )
 
     def __init__(self, memory):
 
         self.memory = memory
 
-        # Web search engine
         self.tool = WebSearchTool()
 
     # ---------------------------------
@@ -35,6 +35,8 @@ class WebSearchSkill:
             "look online for "
         ]
 
+        query = None
+
         for prefix in prefixes:
 
             if message.lower().startswith(prefix):
@@ -43,80 +45,98 @@ class WebSearchSkill:
                     len(prefix):
                 ].strip()
 
-                if not query:
+                break
 
-                    return (
-                        "Aether: What would you "
-                        "like me to search for?"
-                    )
+        if query is None:
 
-                results = self.tool.search(
-                    query
+            return None
+
+        if not query:
+
+            return (
+                "Aether: What would you "
+                "like me to search for?"
+            )
+
+        # ---------------------------------
+        # Search + synthesized answer
+        # ---------------------------------
+
+        search_data = self.tool.search_with_answer(
+            query,
+            max_results=5
+        )
+
+        answer = search_data.get(
+            "answer",
+            ""
+        ).strip()
+
+        results = search_data.get(
+            "results",
+            []
+        )
+
+        # ---------------------------------
+        # Fallback
+        # ---------------------------------
+
+        if not answer and not results:
+
+            return (
+                "Aether: I couldn't find "
+                "any useful web results."
+            )
+
+        # ---------------------------------
+        # Build Response
+        # ---------------------------------
+
+        output = (
+            f"Aether: Here's what I found "
+            f"for: {query}\n\n"
+        )
+
+        if answer:
+
+            output += (
+                f"{answer}\n\n"
+            )
+
+        # ---------------------------------
+        # Sources
+        # ---------------------------------
+
+        if results:
+
+            output += "Sources:\n"
+
+            for index, result in enumerate(
+                results,
+                start=1
+            ):
+
+                title = result.get(
+                    "title",
+                    "Untitled"
                 )
 
-                if not results:
-
-                    return (
-                        "Aether: I couldn't find "
-                        "any search results."
-                    )
-
-                output = (
-                    f"Aether: I found "
-                    f"{len(results)} results "
-                    f"for: {query}\n\n"
+                url = result.get(
+                    "url",
+                    ""
                 )
 
-                for index, result in enumerate(
-                    results,
-                    start=1
-                ):
+                output += (
+                    f"{index}. {title}\n"
+                )
 
-                    title = result.get(
-                        "title",
-                        "Untitled"
-                    )
-
-                    url = result.get(
-                        "url",
-                        ""
-                    )
-
-                    content = result.get(
-                        "content",
-                        ""
-                    )
+                if url:
 
                     output += (
-                        f"{index}. {title}\n"
                         f"   {url}\n"
                     )
 
-                    if content:
-
-                        # Keep terminal output readable.
-                        summary = (
-                            content
-                            .replace("\n", " ")
-                            .strip()
-                        )
-
-                        if len(summary) > 300:
-
-                            summary = (
-                                summary[:300]
-                                + "..."
-                            )
-
-                        output += (
-                            f"   {summary}\n"
-                        )
-
-                    output += "\n"
-
-                return output.rstrip()
-
-        return None
+        return output.rstrip()
 
     # ---------------------------------
     # EXECUTE
