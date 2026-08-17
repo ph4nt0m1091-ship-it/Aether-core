@@ -1,3 +1,0 @@
-"""
-Aether mission system.
-"""
