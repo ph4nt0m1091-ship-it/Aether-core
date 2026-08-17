@@ -5,6 +5,7 @@ from skills.calculator_skill import CalculatorSkill
 from skills.file_skill import FileSkill
 from skills.web_search_skill import WebSearchSkill
 from skills.research_skill import ResearchSkill
+from skills.system_skill import SystemSkill
 
 
 class SkillRegistry:
@@ -21,7 +22,8 @@ class SkillRegistry:
             CalculatorSkill(memory),
             FileSkill(memory),
             WebSearchSkill(memory),
-            ResearchSkill(memory)
+            ResearchSkill(memory),
+            SystemSkill(memory)
         ]
 
     # ---------------------------------
@@ -32,7 +34,9 @@ class SkillRegistry:
 
         for skill in self.skills:
 
-            response = skill.handle(message)
+            response = skill.handle(
+                message
+            )
 
             if response is not None:
 
@@ -50,7 +54,9 @@ class SkillRegistry:
 
             if skill.name == step["skill"]:
 
-                return skill.execute(step)
+                return skill.execute(
+                    step
+                )
 
         return None
 
