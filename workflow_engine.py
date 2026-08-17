@@ -7,14 +7,10 @@ class WorkflowEngine:
     """
     Executes dynamic Aether workflows.
 
-    WorkflowEngine can delegate actions to:
+    Supports:
     - Aether skills
-    - Capability providers
-
-    Terminal commands are intentionally not routed
-    directly through providers here because terminal
-    commands must remain behind TerminalSkill's
-    permission system.
+    - capability providers
+    - permission-aware terminal pauses
     """
 
     def __init__(
@@ -45,8 +41,6 @@ class WorkflowEngine:
 
         workflow.status = "running"
 
-        output = []
-
         while workflow.has_next_step():
 
             step = workflow.next_step()
@@ -55,13 +49,39 @@ class WorkflowEngine:
                 step
             )
 
+            # -------------------------
+            # PERMISSION PAUSE
+            # -------------------------
+
+            if result.get(
+                "paused"
+            ):
+
+                workflow.status = "paused"
+
+                return {
+                    "success": True,
+                    "paused": True,
+                    "status": "paused",
+                    "progress": workflow.progress(),
+                    "permission_message": result.get(
+                        "response",
+                        ""
+                    ),
+                    "results": workflow.results
+                }
+
+            # -------------------------
+            # RECORD RESULT
+            # -------------------------
+
             workflow.add_result(
                 result
             )
 
-            output.append(
-                result
-            )
+            # -------------------------
+            # FAILURE
+            # -------------------------
 
             if not result.get(
                 "success",
@@ -72,18 +92,20 @@ class WorkflowEngine:
 
                 return {
                     "success": False,
+                    "paused": False,
                     "status": workflow.status,
                     "progress": workflow.progress(),
-                    "results": output
+                    "results": workflow.results
                 }
 
         workflow.status = "completed"
 
         return {
             "success": True,
-            "status": workflow.status,
+            "paused": False,
+            "status": "completed",
             "progress": 100,
-            "results": output
+            "results": workflow.results
         }
 
     # ---------------------------------
@@ -114,7 +136,7 @@ class WorkflowEngine:
         )
 
         # ---------------------------------
-        # SKILL MESSAGE
+        # SKILL
         # ---------------------------------
 
         if step_type == "skill":
@@ -140,15 +162,43 @@ class WorkflowEngine:
                     )
                 }
 
+            # -------------------------
+            # TERMINAL PERMISSION
+            # -------------------------
+
+            if action == "terminal":
+
+                terminal_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "terminal"
+                    )
+                )
+
+                if (
+                    terminal_skill is not None
+                    and terminal_skill.permissions.has_pending()
+                ):
+
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "type": "skill",
+                        "action": action,
+                        "response": response
+                    }
+
             return {
                 "success": True,
+                "paused": False,
                 "type": "skill",
                 "action": action,
                 "response": response
             }
 
         # ---------------------------------
-        # PROVIDER CAPABILITY
+        # PROVIDER
         # ---------------------------------
 
         if step_type == "provider":
@@ -161,15 +211,13 @@ class WorkflowEngine:
 
             result["type"] = "provider"
             result["action"] = action
+            result["paused"] = False
 
             return result
 
-        # ---------------------------------
-        # UNKNOWN STEP
-        # ---------------------------------
-
         return {
             "success": False,
+            "paused": False,
             "type": step_type,
             "action": action,
             "error": (

@@ -20,10 +20,12 @@ class SkillRegistry:
         memory
     ):
 
-        self.workflow_skill = (
-            WorkflowSkill(
-                memory
-            )
+        self.workflow_skill = WorkflowSkill(
+            memory
+        )
+
+        self.terminal_skill = TerminalSkill(
+            memory
         )
 
         self.skills = [
@@ -35,12 +37,15 @@ class SkillRegistry:
             WebSearchSkill(memory),
             ResearchSkill(memory),
             SystemSkill(memory),
-            TerminalSkill(memory),
-            self.workflow_skill
+
+            # Workflow must come before terminal
+            # so paused workflows can resume.
+            self.workflow_skill,
+            self.terminal_skill
         ]
 
     # ---------------------------------
-    # CONNECT SKILL MANAGER
+    # CONNECT MANAGER
     # ---------------------------------
 
     def connect_manager(
@@ -51,6 +56,23 @@ class SkillRegistry:
         self.workflow_skill.connect(
             skill_manager
         )
+
+    # ---------------------------------
+    # GET SKILL
+    # ---------------------------------
+
+    def get_skill(
+        self,
+        name
+    ):
+
+        for skill in self.skills:
+
+            if skill.name == name:
+
+                return skill
+
+        return None
 
     # ---------------------------------
     # HANDLE
@@ -82,18 +104,21 @@ class SkillRegistry:
         step
     ):
 
-        for skill in self.skills:
+        skill = self.get_skill(
+            step["skill"]
+        )
 
-            if (
-                skill.name
-                == step["skill"]
-            ):
+        if skill is None:
 
-                return skill.execute(
-                    step
-                )
+            return None
 
-        return None
+        return skill.execute(
+            step
+        )
+
+    # ---------------------------------
+    # AVAILABLE SKILLS
+    # ---------------------------------
 
     def available_skills(
         self
@@ -103,6 +128,10 @@ class SkillRegistry:
             skill.name
             for skill in self.skills
         ]
+
+    # ---------------------------------
+    # DESCRIPTIONS
+    # ---------------------------------
 
     def describe_skills(
         self
