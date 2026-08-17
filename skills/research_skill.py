@@ -1,3 +1,4 @@
+from research_engine import ResearchEngine
 from tools.web_search_tool import WebSearchTool
 
 
@@ -5,8 +6,8 @@ class ResearchSkill:
     """
     Performs structured web research for Aether.
 
-    ResearchSkill uses web search results and a synthesized
-    answer to produce a cleaner research-style response.
+    ResearchSkill gathers web information and sends
+    it through ResearchEngine for structured analysis.
     """
 
     name = "research"
@@ -19,7 +20,10 @@ class ResearchSkill:
     def __init__(self, memory):
 
         self.memory = memory
+
         self.tool = WebSearchTool()
+
+        self.engine = ResearchEngine()
 
     # ---------------------------------
     # HANDLE
@@ -64,22 +68,36 @@ class ResearchSkill:
         # Gather Research
         # ---------------------------------
 
-        research = self.tool.search_with_answer(
+        search_data = self.tool.search_with_answer(
             query,
             max_results=5
         )
 
-        answer = research.get(
-            "answer",
+        # ---------------------------------
+        # Analyze Research
+        # ---------------------------------
+
+        research = self.engine.analyze(
+            query,
+            search_data
+        )
+
+        summary = research.get(
+            "summary",
             ""
         ).strip()
 
-        results = research.get(
-            "results",
+        sources = research.get(
+            "sources",
             []
         )
 
-        if not answer and not results:
+        source_count = research.get(
+            "source_count",
+            0
+        )
+
+        if not summary and not sources:
 
             return (
                 "Aether: I couldn't find enough "
@@ -94,28 +112,31 @@ class ResearchSkill:
             f"Aether: Researching: {query}\n\n"
         )
 
-        if answer:
+        if summary:
 
             output += (
                 "Findings:\n"
-                f"{answer}\n\n"
+                f"{summary}\n\n"
             )
 
-        if results:
+        if sources:
 
-            output += "Sources:\n"
+            output += (
+                f"Sources analyzed: "
+                f"{source_count}\n"
+            )
 
-            for index, result in enumerate(
-                results,
+            for index, source in enumerate(
+                sources,
                 start=1
             ):
 
-                title = result.get(
+                title = source.get(
                     "title",
                     "Untitled"
                 )
 
-                url = result.get(
+                url = source.get(
                     "url",
                     ""
                 )
