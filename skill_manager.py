@@ -6,23 +6,46 @@ class SkillManager:
     Manages all of Aether's skills.
     """
 
-    def __init__(self, memory):
+    def __init__(
+        self,
+        memory
+    ):
 
         self.memory = memory
 
-        self.registry = SkillRegistry(memory)
+        self.registry = (
+            SkillRegistry(
+                memory
+            )
+        )
 
-    def handle(self, message):
+        self.registry.connect_manager(
+            self
+        )
 
-        return self.registry.handle(message)
+    def handle(
+        self,
+        message
+    ):
 
-    def execute(self, step):
+        return self.registry.handle(
+            message
+        )
 
-        self.registry.execute(step)
+    def execute(
+        self,
+        step
+    ):
 
-    def available_skills(self):
-        """
-        Returns every registered skill.
-        """
+        return self.registry.execute(
+            step
+        )
 
-        return self.registry.available_skills()
+    def available_skills(
+        self
+    ):
+
+        return (
+            self.registry
+            .available_skills()
+        )

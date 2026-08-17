@@ -7,6 +7,7 @@ from skills.web_search_skill import WebSearchSkill
 from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
 from skills.terminal_skill import TerminalSkill
+from skills.workflow_skill import WorkflowSkill
 
 
 class SkillRegistry:
@@ -14,7 +15,16 @@ class SkillRegistry:
     Stores and manages all of Aether's skills.
     """
 
-    def __init__(self, memory):
+    def __init__(
+        self,
+        memory
+    ):
+
+        self.workflow_skill = (
+            WorkflowSkill(
+                memory
+            )
+        )
 
         self.skills = [
             GreetingSkill(memory),
@@ -25,14 +35,31 @@ class SkillRegistry:
             WebSearchSkill(memory),
             ResearchSkill(memory),
             SystemSkill(memory),
-            TerminalSkill(memory)
+            TerminalSkill(memory),
+            self.workflow_skill
         ]
+
+    # ---------------------------------
+    # CONNECT SKILL MANAGER
+    # ---------------------------------
+
+    def connect_manager(
+        self,
+        skill_manager
+    ):
+
+        self.workflow_skill.connect(
+            skill_manager
+        )
 
     # ---------------------------------
     # HANDLE
     # ---------------------------------
 
-    def handle(self, message):
+    def handle(
+        self,
+        message
+    ):
 
         for skill in self.skills:
 
@@ -50,11 +77,17 @@ class SkillRegistry:
     # EXECUTE
     # ---------------------------------
 
-    def execute(self, step):
+    def execute(
+        self,
+        step
+    ):
 
         for skill in self.skills:
 
-            if skill.name == step["skill"]:
+            if (
+                skill.name
+                == step["skill"]
+            ):
 
                 return skill.execute(
                     step
@@ -62,22 +95,18 @@ class SkillRegistry:
 
         return None
 
-    # ---------------------------------
-    # AVAILABLE SKILLS
-    # ---------------------------------
-
-    def available_skills(self):
+    def available_skills(
+        self
+    ):
 
         return [
             skill.name
             for skill in self.skills
         ]
 
-    # ---------------------------------
-    # DESCRIBE SKILLS
-    # ---------------------------------
-
-    def describe_skills(self):
+    def describe_skills(
+        self
+    ):
 
         return [
             {
