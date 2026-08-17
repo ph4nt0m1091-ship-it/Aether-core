@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -7,23 +8,20 @@ from providers.base_provider import BaseProvider
 
 class LocalSystemProvider(BaseProvider):
     """
-    Provides safe local Windows system capabilities.
+    Provides controlled local Windows capabilities.
 
-    Initial capabilities:
+    Capabilities:
     - Open approved applications
     - Open files/folders
     - List running processes
-
-    More sensitive capabilities such as arbitrary
-    command execution will be added behind Aether's
-    permission layer.
+    - Run approved executable commands
     """
 
     name = "local_system"
 
     description = (
-        "Controls approved applications and "
-        "local Windows resources."
+        "Controls approved applications, local resources, "
+        "and permission-gated commands."
     )
 
     APP_ALIASES = {
@@ -52,30 +50,34 @@ class LocalSystemProvider(BaseProvider):
         )
     }
 
-    # ---------------------------------
-    # PROVIDER STATUS
-    # ---------------------------------
+    APPROVED_EXECUTABLES = {
+        "git",
+        "git.exe",
+        "python",
+        "python.exe",
+        "py",
+        "py.exe",
+        "where",
+        "where.exe",
+        "tasklist",
+        "tasklist.exe",
+        "ipconfig",
+        "ipconfig.exe",
+        "ping",
+        "ping.exe"
+    }
 
     def available(self):
-        """
-        Return True when running on Windows.
-        """
 
         return os.name == "nt"
 
-    # ---------------------------------
-    # CAPABILITIES
-    # ---------------------------------
-
     def capabilities(self):
-        """
-        Return capabilities provided by this provider.
-        """
 
         return [
             "open_app",
             "open_path",
-            "list_processes"
+            "list_processes",
+            "run_command"
         ]
 
     # ---------------------------------
@@ -87,9 +89,6 @@ class LocalSystemProvider(BaseProvider):
         capability,
         task
     ):
-        """
-        Route a capability request to the correct action.
-        """
 
         if capability == "open_app":
 
@@ -107,6 +106,12 @@ class LocalSystemProvider(BaseProvider):
 
             return self._list_processes()
 
+        if capability == "run_command":
+
+            return self._run_command(
+                task
+            )
+
         return {
             "success": False,
             "provider": self.name,
@@ -121,9 +126,6 @@ class LocalSystemProvider(BaseProvider):
     # ---------------------------------
 
     def _open_app(self, task):
-        """
-        Open an application from Aether's approved list.
-        """
 
         if isinstance(
             task,
@@ -209,13 +211,10 @@ class LocalSystemProvider(BaseProvider):
         }
 
     # ---------------------------------
-    # OPEN FILE OR FOLDER
+    # OPEN PATH
     # ---------------------------------
 
     def _open_path(self, task):
-        """
-        Open an existing file or folder using Windows.
-        """
 
         if isinstance(
             task,
@@ -290,9 +289,6 @@ class LocalSystemProvider(BaseProvider):
     # ---------------------------------
 
     def _list_processes(self):
-        """
-        Read the currently running Windows processes.
-        """
 
         try:
 
@@ -351,10 +347,6 @@ class LocalSystemProvider(BaseProvider):
                 )
             ]
 
-            if not parts:
-
-                continue
-
             processes.append(
                 {
                     "name": parts[0],
@@ -374,4 +366,174 @@ class LocalSystemProvider(BaseProvider):
                 processes
             ),
             "processes": processes
+        }
+
+    # ---------------------------------
+    # RUN COMMAND
+    # ---------------------------------
+
+    def _run_command(self, task):
+        """
+        Execute a command without using shell=True.
+
+        CommandPolicy and PermissionManager are responsible
+        for deciding whether execution is permitted.
+        """
+
+        if isinstance(
+            task,
+            dict
+        ):
+
+            command = task.get(
+                "command",
+                ""
+            )
+
+            cwd = task.get(
+                "cwd"
+            )
+
+        else:
+
+            command = str(
+                task
+            )
+
+            cwd = None
+
+        command = command.strip()
+
+        if not command:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    "No command was provided."
+                )
+            }
+
+        try:
+
+            parts = shlex.split(
+                command,
+                posix=False
+            )
+
+        except ValueError as error:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    f"Unable to parse command: "
+                    f"{error}"
+                )
+            }
+
+        parts = [
+            part.strip(
+                "\"'"
+            )
+            for part in parts
+        ]
+
+        if not parts:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    "No executable was found."
+                )
+            }
+
+        executable = (
+            Path(parts[0])
+            .name
+            .lower()
+        )
+
+        if executable not in self.APPROVED_EXECUTABLES:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    f'Executable "{executable}" '
+                    "is not approved."
+                )
+            }
+
+        if cwd:
+
+            working_directory = Path(
+                cwd
+            ).expanduser()
+
+            if not working_directory.exists():
+
+                return {
+                    "success": False,
+                    "provider": self.name,
+                    "error": (
+                        f"Working directory does not exist: "
+                        f"{working_directory}"
+                    )
+                }
+
+            working_directory = str(
+                working_directory
+            )
+
+        else:
+
+            working_directory = None
+
+        try:
+
+            result = subprocess.run(
+                parts,
+                cwd=working_directory,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                shell=False
+            )
+
+        except subprocess.TimeoutExpired:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    "Command timed out after 60 seconds."
+                )
+            }
+
+        except (
+            FileNotFoundError,
+            OSError,
+            subprocess.SubprocessError
+        ) as error:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": str(
+                    error
+                )
+            }
+
+        return {
+            "success": (
+                result.returncode == 0
+            ),
+            "provider": self.name,
+            "capability": "run_command",
+            "command": command,
+            "returncode": result.returncode,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip()
         }

@@ -6,6 +6,7 @@ from skills.file_skill import FileSkill
 from skills.web_search_skill import WebSearchSkill
 from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
+from skills.terminal_skill import TerminalSkill
 
 
 class SkillRegistry:
@@ -23,7 +24,8 @@ class SkillRegistry:
             FileSkill(memory),
             WebSearchSkill(memory),
             ResearchSkill(memory),
-            SystemSkill(memory)
+            SystemSkill(memory),
+            TerminalSkill(memory)
         ]
 
     # ---------------------------------
