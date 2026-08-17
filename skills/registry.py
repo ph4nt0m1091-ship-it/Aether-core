@@ -4,6 +4,7 @@ from skills.time_skill import TimeSkill
 from skills.calculator_skill import CalculatorSkill
 from skills.file_skill import FileSkill
 from skills.web_search_skill import WebSearchSkill
+from skills.research_skill import ResearchSkill
 
 
 class SkillRegistry:
@@ -19,7 +20,8 @@ class SkillRegistry:
             TimeSkill(memory),
             CalculatorSkill(memory),
             FileSkill(memory),
-            WebSearchSkill(memory)
+            WebSearchSkill(memory),
+            ResearchSkill(memory)
         ]
 
     # ---------------------------------
@@ -57,9 +59,6 @@ class SkillRegistry:
     # ---------------------------------
 
     def available_skills(self):
-        """
-        Returns the names of every registered skill.
-        """
 
         return [
             skill.name
@@ -71,9 +70,6 @@ class SkillRegistry:
     # ---------------------------------
 
     def describe_skills(self):
-        """
-        Returns capability metadata for every skill.
-        """
 
         return [
             {
