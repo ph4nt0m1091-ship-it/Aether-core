@@ -61,6 +61,31 @@ class ResearchEngine:
         "each"
     }
 
+    IRREGULAR_NORMALIZATION = {
+        "motors": "motor",
+        "drivers": "driver",
+        "controllers": "controller",
+        "robots": "robot",
+        "batteries": "battery",
+        "motors": "motor",
+        "devices": "device",
+        "systems": "system",
+        "signals": "signal",
+        "transistors": "transistor",
+        "circuits": "circuit"
+    }
+
+    PROTECTED_WORDS = {
+        "analysis",
+        "physics",
+        "electronics",
+        "robotics",
+        "news",
+        "series",
+        "species",
+        "status"
+    }
+
     def analyze(self, query, search_data):
         """
         Analyze search results and return structured research.
@@ -142,6 +167,68 @@ class ResearchEngine:
         }
 
     # ---------------------------------
+    # WORD NORMALIZATION
+    # ---------------------------------
+
+    def _normalize_word(self, word):
+        """
+        Normalize simple plural forms into a shared concept.
+
+        This intentionally stays conservative so words such
+        as physics, electronics, analysis, and robotics are
+        not incorrectly modified.
+        """
+
+        word = word.lower().strip()
+
+        if not word:
+
+            return word
+
+        if word in self.PROTECTED_WORDS:
+
+            return word
+
+        if word in self.IRREGULAR_NORMALIZATION:
+
+            return self.IRREGULAR_NORMALIZATION[
+                word
+            ]
+
+        # batteries -> battery
+        if (
+            word.endswith("ies")
+            and len(word) > 4
+        ):
+
+            return (
+                word[:-3]
+                + "y"
+            )
+
+        # controllers -> controller
+        # drivers -> driver
+        # motors -> motor
+        #
+        # Avoid words ending with:
+        # ss, us, is
+        if (
+            word.endswith("s")
+            and len(word) > 4
+            and not word.endswith(
+                (
+                    "ss",
+                    "us",
+                    "is"
+                )
+            )
+        ):
+
+            return word[:-1]
+
+        return word
+
+    # ---------------------------------
     # KEYWORD EXTRACTION
     # ---------------------------------
 
@@ -159,17 +246,37 @@ class ResearchEngine:
             text.lower()
         )
 
-        filtered = [
-            word
-            for word in words
+        normalized = []
+
+        for word in words:
+
             if (
-                len(word) >= 4
-                and word not in self.STOP_WORDS
+                len(word) < 4
+                or word in self.STOP_WORDS
+            ):
+
+                continue
+
+            normalized_word = (
+                self._normalize_word(
+                    word
+                )
             )
-        ]
+
+            if (
+                not normalized_word
+                or normalized_word
+                in self.STOP_WORDS
+            ):
+
+                continue
+
+            normalized.append(
+                normalized_word
+            )
 
         counts = Counter(
-            filtered
+            normalized
         )
 
         return [
@@ -189,7 +296,8 @@ class ResearchEngine:
         limit=10
     ):
         """
-        Find keywords that appear across multiple sources.
+        Find normalized keywords that appear
+        across multiple sources.
         """
 
         topic_counts = Counter()
