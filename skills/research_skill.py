@@ -14,7 +14,7 @@ class ResearchSkill:
 
     description = (
         "Researches a topic using web sources and "
-        "returns findings with supporting sources."
+        "returns findings with supporting evidence."
     )
 
     def __init__(self, memory):
@@ -97,6 +97,16 @@ class ResearchSkill:
             0
         )
 
+        shared_topics = research.get(
+            "shared_topics",
+            []
+        )
+
+        evidence_summary = research.get(
+            "evidence_summary",
+            ""
+        ).strip()
+
         if not summary and not sources:
 
             return (
@@ -112,12 +122,64 @@ class ResearchSkill:
             f"Aether: Researching: {query}\n\n"
         )
 
+        # ---------------------------------
+        # Main Findings
+        # ---------------------------------
+
         if summary:
 
             output += (
                 "Findings:\n"
                 f"{summary}\n\n"
             )
+
+        # ---------------------------------
+        # Evidence Analysis
+        # ---------------------------------
+
+        if evidence_summary:
+
+            output += (
+                "Evidence analysis:\n"
+                f"{evidence_summary}\n\n"
+            )
+
+        # ---------------------------------
+        # Shared Topics
+        # ---------------------------------
+
+        if shared_topics:
+
+            output += (
+                "Shared topics across sources:\n"
+            )
+
+            for item in shared_topics[:5]:
+
+                topic = item.get(
+                    "topic",
+                    ""
+                )
+
+                count = item.get(
+                    "sources",
+                    0
+                )
+
+                if not topic:
+
+                    continue
+
+                output += (
+                    f"- {topic} "
+                    f"({count} sources)\n"
+                )
+
+            output += "\n"
+
+        # ---------------------------------
+        # Sources
+        # ---------------------------------
 
         if sources:
 
