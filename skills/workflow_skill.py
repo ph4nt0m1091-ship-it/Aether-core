@@ -4,17 +4,23 @@ from workflow_engine import WorkflowEngine
 
 class WorkflowSkill:
     """
-    Coordinates multi-step Aether workflows.
+    Coordinates persistent, resumable Aether workflows.
 
-    Workflows can pause for terminal permission
-    and resume after the user approves or denies.
+    Workflows can:
+    - Execute multiple skills/providers
+    - Pause for terminal permission
+    - Resume after approval
+    - Survive Aether restarts
+    - Recover unfinished work safely
+
+    Permission itself is never persisted.
     """
 
     name = "workflow"
 
     description = (
-        "Coordinates multiple Aether skills and "
-        "providers as resumable workflows."
+        "Coordinates persistent multi-step Aether workflows "
+        "that can pause, resume, and recover after restarts."
     )
 
     def __init__(
@@ -29,7 +35,13 @@ class WorkflowSkill:
 
         self.engine = None
 
+        # Workflow currently waiting for
+        # an in-memory permission response.
         self.pending_workflow = None
+
+        # Workflow discovered from persistent
+        # storage after Aether starts.
+        self.recovered_workflow = None
 
     # ---------------------------------
     # CONNECT MANAGER
@@ -46,6 +58,30 @@ class WorkflowSkill:
             skill_manager
         )
 
+        self.recovered_workflow = (
+            self.engine.latest_unfinished()
+        )
+
+        # A workflow that was "running" when
+        # Aether stopped should be considered
+        # recoverable rather than automatically
+        # continuing without the user.
+        if (
+            self.recovered_workflow is not None
+            and self.recovered_workflow.status
+            == "running"
+        ):
+
+            self.recovered_workflow.status = (
+                "paused"
+            )
+
+            self.recovered_workflow.touch()
+
+            self.engine.store.save(
+                self.recovered_workflow
+            )
+
     # ---------------------------------
     # HANDLE
     # ---------------------------------
@@ -57,8 +93,10 @@ class WorkflowSkill:
 
         message = message.strip()
 
+        lower = message.lower()
+
         # ---------------------------------
-        # RESUME PAUSED WORKFLOW
+        # ACTIVE PERMISSION REQUEST
         # ---------------------------------
 
         if self.pending_workflow is not None:
@@ -67,7 +105,46 @@ class WorkflowSkill:
                 message
             )
 
-        lower = message.lower()
+        # ---------------------------------
+        # WORKFLOW STATUS
+        # ---------------------------------
+
+        if lower in (
+            "workflow status",
+            "show workflow",
+            "show current workflow",
+            "show pending workflow"
+        ):
+
+            return self._workflow_status()
+
+        # ---------------------------------
+        # RESUME SAVED WORKFLOW
+        # ---------------------------------
+
+        if lower in (
+            "resume workflow",
+            "resume last workflow",
+            "continue workflow",
+            "continue last workflow"
+        ):
+
+            return self._resume_saved_workflow()
+
+        # ---------------------------------
+        # CANCEL SAVED WORKFLOW
+        # ---------------------------------
+
+        if lower in (
+            "cancel workflow",
+            "cancel current workflow"
+        ):
+
+            return self._cancel_saved_workflow()
+
+        # ---------------------------------
+        # NEW WORKFLOW
+        # ---------------------------------
 
         if not lower.startswith(
             "workflow "
@@ -112,7 +189,21 @@ class WorkflowSkill:
             "paused"
         ):
 
-            self.pending_workflow = workflow
+            self.pending_workflow = (
+                workflow
+            )
+
+            self.recovered_workflow = (
+                workflow
+            )
+
+        elif workflow.status in (
+            "completed",
+            "failed",
+            "cancelled"
+        ):
+
+            self.recovered_workflow = None
 
         return self._format_result(
             workflow,
@@ -120,7 +211,72 @@ class WorkflowSkill:
         )
 
     # ---------------------------------
-    # HANDLE PAUSED WORKFLOW
+    # RESUME PERSISTED WORKFLOW
+    # ---------------------------------
+
+    def _resume_saved_workflow(
+        self
+    ):
+
+        if self.engine is None:
+
+            return (
+                "Aether: Workflow Engine "
+                "is not connected."
+            )
+
+        workflow = self.recovered_workflow
+
+        if workflow is None:
+
+            workflow = (
+                self.engine
+                .latest_unfinished()
+            )
+
+        if workflow is None:
+
+            return (
+                "Aether: There is no unfinished "
+                "workflow to resume."
+            )
+
+        self.recovered_workflow = (
+            workflow
+        )
+
+        # Engine execution will recreate any
+        # required terminal permission request.
+        #
+        # A previously granted permission is
+        # intentionally NOT restored.
+        result = self.engine.execute(
+            workflow
+        )
+
+        if result.get(
+            "paused"
+        ):
+
+            self.pending_workflow = (
+                workflow
+            )
+
+        elif workflow.status in (
+            "completed",
+            "failed",
+            "cancelled"
+        ):
+
+            self.recovered_workflow = None
+
+        return self._format_result(
+            workflow,
+            result
+        )
+
+    # ---------------------------------
+    # HANDLE PAUSED PERMISSION
     # ---------------------------------
 
     def _handle_pending_workflow(
@@ -138,7 +294,22 @@ class WorkflowSkill:
 
         if terminal_skill is None:
 
+            workflow = (
+                self.pending_workflow
+            )
+
+            workflow.status = (
+                "cancelled"
+            )
+
+            workflow.touch()
+
+            self.engine.store.save(
+                workflow
+            )
+
             self.pending_workflow = None
+            self.recovered_workflow = None
 
             return (
                 "Aether: Terminal skill is unavailable. "
@@ -151,15 +322,19 @@ class WorkflowSkill:
             )
         )
 
-        # User hasn't answered yes/no yet.
-        if terminal_skill.permissions.has_pending():
+        # User did not provide a valid yes/no yet.
+        if (
+            terminal_skill
+            .permissions
+            .has_pending()
+        ):
 
             return permission_response
 
         workflow = self.pending_workflow
 
         # ---------------------------------
-        # CANCELLED
+        # USER DENIED
         # ---------------------------------
 
         if (
@@ -167,37 +342,81 @@ class WorkflowSkill:
             == "Aether: Command cancelled."
         ):
 
-            workflow.status = "cancelled"
+            workflow.status = (
+                "cancelled"
+            )
+
+            workflow.touch()
+
+            self.engine.store.save(
+                workflow
+            )
 
             self.pending_workflow = None
+            self.recovered_workflow = None
 
             return (
                 f"{permission_response}\n\n"
                 "Aether: Workflow cancelled.\n"
-                f"Progress: {workflow.progress()}%"
+                f"Progress: "
+                f"{workflow.progress()}%"
             )
 
         # ---------------------------------
-        # COMMAND FAILURE
+        # THE PAUSED STEP WAS ATTEMPTED
+        # ---------------------------------
+        #
+        # WorkflowEngine rewinds a step when
+        # permission is required.
+        #
+        # TerminalSkill has now executed that
+        # command after approval, so advance the
+        # workflow past that step before continuing.
+
+        if workflow.has_next_step():
+
+            workflow.current_step += 1
+
+            workflow.touch()
+
+        # ---------------------------------
+        # COMMAND FAILED
         # ---------------------------------
 
-        if permission_response.startswith(
-            "Aether: Command failed."
+        if (
+            permission_response
+            .startswith(
+                "Aether: Command failed."
+            )
         ):
 
             workflow.add_result(
                 {
                     "success": False,
+                    "paused": False,
                     "type": "skill",
                     "action": "terminal",
-                    "response": permission_response,
-                    "error": permission_response
+                    "response": (
+                        permission_response
+                    ),
+                    "error": (
+                        permission_response
+                    )
                 }
             )
 
-            workflow.status = "failed"
+            workflow.status = (
+                "failed"
+            )
+
+            workflow.touch()
+
+            self.engine.store.save(
+                workflow
+            )
 
             self.pending_workflow = None
+            self.recovered_workflow = None
 
             return self._format_result(
                 workflow,
@@ -205,8 +424,12 @@ class WorkflowSkill:
                     "success": False,
                     "paused": False,
                     "status": "failed",
-                    "progress": workflow.progress(),
-                    "results": workflow.results
+                    "progress": (
+                        workflow.progress()
+                    ),
+                    "results": (
+                        workflow.results
+                    )
                 }
             )
 
@@ -220,13 +443,19 @@ class WorkflowSkill:
                 "paused": False,
                 "type": "skill",
                 "action": "terminal",
-                "response": permission_response
+                "response": (
+                    permission_response
+                )
             }
+        )
+
+        self.engine.store.save(
+            workflow
         )
 
         self.pending_workflow = None
 
-        # Continue with remaining steps.
+        # Continue remaining steps.
         result = self.engine.execute(
             workflow
         )
@@ -235,11 +464,136 @@ class WorkflowSkill:
             "paused"
         ):
 
-            self.pending_workflow = workflow
+            self.pending_workflow = (
+                workflow
+            )
+
+            self.recovered_workflow = (
+                workflow
+            )
+
+        elif workflow.status in (
+            "completed",
+            "failed",
+            "cancelled"
+        ):
+
+            self.recovered_workflow = None
 
         return self._format_result(
             workflow,
             result
+        )
+
+    # ---------------------------------
+    # WORKFLOW STATUS
+    # ---------------------------------
+
+    def _workflow_status(
+        self
+    ):
+
+        workflow = (
+            self.pending_workflow
+            or self.recovered_workflow
+        )
+
+        if workflow is None:
+
+            workflow = (
+                self.engine
+                .latest_unfinished()
+            )
+
+        if workflow is None:
+
+            return (
+                "Aether: No unfinished "
+                "workflow found."
+            )
+
+        next_step = (
+            workflow.peek_next_step()
+        )
+
+        output = (
+            "Aether: Current Workflow\n\n"
+            f"ID: {workflow.workflow_id}\n"
+            f"Goal: {workflow.goal}\n"
+            f"Status: {workflow.status}\n"
+            f"Progress: "
+            f"{workflow.progress()}%\n"
+            f"Completed results: "
+            f"{len(workflow.results)}"
+        )
+
+        if next_step:
+
+            output += (
+                "\n\nNext step:\n"
+                f"- Type: "
+                f"{next_step.get('type')}\n"
+                f"- Action: "
+                f"{next_step.get('action')}"
+            )
+
+        return output
+
+    # ---------------------------------
+    # CANCEL SAVED WORKFLOW
+    # ---------------------------------
+
+    def _cancel_saved_workflow(
+        self
+    ):
+
+        workflow = (
+            self.pending_workflow
+            or self.recovered_workflow
+        )
+
+        if workflow is None:
+
+            workflow = (
+                self.engine
+                .latest_unfinished()
+            )
+
+        if workflow is None:
+
+            return (
+                "Aether: There is no unfinished "
+                "workflow to cancel."
+            )
+
+        terminal_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "terminal"
+            )
+        )
+
+        if terminal_skill is not None:
+
+            terminal_skill.permissions.cancel()
+
+        workflow.status = (
+            "cancelled"
+        )
+
+        workflow.touch()
+
+        self.engine.store.save(
+            workflow
+        )
+
+        self.pending_workflow = None
+        self.recovered_workflow = None
+
+        return (
+            "Aether: Workflow cancelled.\n"
+            f"ID: {workflow.workflow_id}"
         )
 
     # ---------------------------------
@@ -257,7 +611,8 @@ class WorkflowSkill:
 
         parts = [
             part.strip()
-            for part in request.split(
+            for part
+            in request.split(
                 " then "
             )
             if part.strip()
@@ -324,7 +679,7 @@ class WorkflowSkill:
                 )
             ):
 
-                message = part
+                search_message = part
 
                 if (
                     lower.startswith(
@@ -339,7 +694,7 @@ class WorkflowSkill:
                         len("search "):
                     ].strip()
 
-                    message = (
+                    search_message = (
                         "search the web for "
                         + query
                     )
@@ -348,14 +703,16 @@ class WorkflowSkill:
                     "skill",
                     "web_search",
                     {
-                        "message": message
+                        "message": (
+                            search_message
+                        )
                     }
                 )
 
                 continue
 
             # -------------------------
-            # OPEN APP
+            # OPEN APPLICATION
             # -------------------------
 
             if lower.startswith(
@@ -399,7 +756,7 @@ class WorkflowSkill:
         return workflow
 
     # ---------------------------------
-    # FORMAT
+    # FORMAT RESULT
     # ---------------------------------
 
     def _format_result(
@@ -410,7 +767,8 @@ class WorkflowSkill:
 
         output = (
             f"Aether: Workflow: "
-            f"{workflow.goal}\n\n"
+            f"{workflow.goal}\n"
+            f"ID: {workflow.workflow_id}\n\n"
         )
 
         for index, item in enumerate(
@@ -426,7 +784,9 @@ class WorkflowSkill:
                 "success"
             ):
 
-                output += "complete\n"
+                output += (
+                    "complete\n"
+                )
 
                 response = item.get(
                     "response"
@@ -438,17 +798,23 @@ class WorkflowSkill:
                         f"{response}\n"
                     )
 
-                elif item.get(
-                    "capability"
-                ) == "open_app":
+                elif (
+                    item.get(
+                        "capability"
+                    )
+                    == "open_app"
+                ):
 
                     output += (
                         "Application opened.\n"
                     )
 
-                elif item.get(
-                    "capability"
-                ) == "list_processes":
+                elif (
+                    item.get(
+                        "capability"
+                    )
+                    == "list_processes"
+                ):
 
                     count = item.get(
                         "count",
@@ -462,7 +828,9 @@ class WorkflowSkill:
 
             else:
 
-                output += "failed\n"
+                output += (
+                    "failed\n"
+                )
 
                 output += (
                     item.get(
@@ -506,6 +874,10 @@ class WorkflowSkill:
         )
 
         return output.rstrip()
+
+    # ---------------------------------
+    # MISSION EXECUTION
+    # ---------------------------------
 
     def execute(
         self,

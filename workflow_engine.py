@@ -2,6 +2,8 @@ from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
 from providers.provider_manager import ProviderManager
 
+from workflow_store import WorkflowStore
+
 
 class WorkflowEngine:
     """
@@ -11,6 +13,7 @@ class WorkflowEngine:
     - Aether skills
     - capability providers
     - permission-aware terminal pauses
+    - persistent workflow state
     """
 
     def __init__(
@@ -30,6 +33,8 @@ class WorkflowEngine:
             LocalSystemProvider()
         )
 
+        self.store = WorkflowStore()
+
     # ---------------------------------
     # EXECUTE WORKFLOW
     # ---------------------------------
@@ -40,6 +45,11 @@ class WorkflowEngine:
     ):
 
         workflow.status = "running"
+        workflow.touch()
+
+        self.store.save(
+            workflow
+        )
 
         while workflow.has_next_step():
 
@@ -49,15 +59,25 @@ class WorkflowEngine:
                 step
             )
 
-            # -------------------------
+            # ---------------------------------
             # PERMISSION PAUSE
-            # -------------------------
+            # ---------------------------------
 
             if result.get(
                 "paused"
             ):
 
+                # The step did not actually execute yet.
+                # Rewind so it is still the next step
+                # after a restart or explicit resume.
+                workflow.rewind_one_step()
+
                 workflow.status = "paused"
+                workflow.touch()
+
+                self.store.save(
+                    workflow
+                )
 
                 return {
                     "success": True,
@@ -71,17 +91,21 @@ class WorkflowEngine:
                     "results": workflow.results
                 }
 
-            # -------------------------
+            # ---------------------------------
             # RECORD RESULT
-            # -------------------------
+            # ---------------------------------
 
             workflow.add_result(
                 result
             )
 
-            # -------------------------
+            self.store.save(
+                workflow
+            )
+
+            # ---------------------------------
             # FAILURE
-            # -------------------------
+            # ---------------------------------
 
             if not result.get(
                 "success",
@@ -89,6 +113,11 @@ class WorkflowEngine:
             ):
 
                 workflow.status = "failed"
+                workflow.touch()
+
+                self.store.save(
+                    workflow
+                )
 
                 return {
                     "success": False,
@@ -99,6 +128,11 @@ class WorkflowEngine:
                 }
 
         workflow.status = "completed"
+        workflow.touch()
+
+        self.store.save(
+            workflow
+        )
 
         return {
             "success": True,
@@ -146,8 +180,11 @@ class WorkflowEngine:
                 ""
             )
 
-            response = self.skill_manager.handle(
-                message
+            response = (
+                self.skill_manager
+                .handle(
+                    message
+                )
             )
 
             if response is None:
@@ -162,9 +199,9 @@ class WorkflowEngine:
                     )
                 }
 
-            # -------------------------
+            # ---------------------------------
             # TERMINAL PERMISSION
-            # -------------------------
+            # ---------------------------------
 
             if action == "terminal":
 
@@ -203,10 +240,12 @@ class WorkflowEngine:
 
         if step_type == "provider":
 
-            result = self.providers.execute(
-                action,
-                data,
-                provider_name=target
+            result = (
+                self.providers.execute(
+                    action,
+                    data,
+                    provider_name=target
+                )
             )
 
             result["type"] = "provider"
@@ -225,3 +264,16 @@ class WorkflowEngine:
                 f'"{step_type}"'
             )
         }
+
+    # ---------------------------------
+    # RECOVERY
+    # ---------------------------------
+
+    def latest_unfinished(
+        self
+    ):
+
+        return (
+            self.store
+            .latest_unfinished()
+        )

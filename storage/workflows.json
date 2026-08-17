@@ -1,0 +1,94 @@
+[
+    {
+        "workflow_id": "wf_d17871c35827",
+        "goal": "persistence test",
+        "steps": [
+            {
+                "type": "provider",
+                "action": "open_app",
+                "data": {
+                    "app": "notepad"
+                },
+                "target": "local_system"
+            }
+        ],
+        "current_step": 0,
+        "results": [],
+        "status": "completed",
+        "created_at": "2026-08-17T07:17:10",
+        "updated_at": "2026-08-17T07:22:53"
+    },
+    {
+        "workflow_id": "wf_f51f84a4c7ac",
+        "goal": "open notepad then open calculator",
+        "steps": [
+            {
+                "type": "provider",
+                "action": "open_app",
+                "data": {
+                    "app": "notepad"
+                },
+                "target": "local_system"
+            },
+            {
+                "type": "provider",
+                "action": "open_app",
+                "data": {
+                    "app": "calculator"
+                },
+                "target": "local_system"
+            }
+        ],
+        "current_step": 2,
+        "results": [
+            {
+                "success": true,
+                "provider": "local_system",
+                "capability": "open_app",
+                "application": "notepad",
+                "type": "provider",
+                "action": "open_app",
+                "paused": false
+            },
+            {
+                "success": true,
+                "provider": "local_system",
+                "capability": "open_app",
+                "application": "calculator",
+                "type": "provider",
+                "action": "open_app",
+                "paused": false
+            }
+        ],
+        "status": "completed",
+        "created_at": "2026-08-17T07:25:06",
+        "updated_at": "2026-08-17T07:25:06"
+    },
+    {
+        "workflow_id": "wf_72f67758c422",
+        "goal": "run git push then open vscode",
+        "steps": [
+            {
+                "type": "skill",
+                "action": "terminal",
+                "data": {
+                    "message": "run git push"
+                },
+                "target": null
+            },
+            {
+                "type": "provider",
+                "action": "open_app",
+                "data": {
+                    "app": "vscode"
+                },
+                "target": "local_system"
+            }
+        ],
+        "current_step": 0,
+        "results": [],
+        "status": "cancelled",
+        "created_at": "2026-08-17T07:25:38",
+        "updated_at": "2026-08-17T07:28:35"
+    }
+]
