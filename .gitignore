@@ -14,3 +14,4 @@ venv/
 Thumbs.db
 storage/workflows.json
 storage/execution_history.json
+storage/scheduled_jobs.json

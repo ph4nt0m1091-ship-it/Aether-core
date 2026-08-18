@@ -8,6 +8,7 @@ from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
 from skills.history_skill import HistorySkill
 from skills.provider_skill import ProviderSkill
+from skills.scheduler_skill import SchedulerSkill
 from skills.terminal_skill import TerminalSkill
 from skills.workflow_skill import WorkflowSkill
 
@@ -22,12 +23,22 @@ class SkillRegistry:
         memory
     ):
 
-        self.workflow_skill = WorkflowSkill(
-            memory
+        self.workflow_skill = (
+            WorkflowSkill(
+                memory
+            )
         )
 
-        self.terminal_skill = TerminalSkill(
-            memory
+        self.scheduler_skill = (
+            SchedulerSkill(
+                memory
+            )
+        )
+
+        self.terminal_skill = (
+            TerminalSkill(
+                memory
+            )
         )
 
         self.skills = [
@@ -41,6 +52,7 @@ class SkillRegistry:
             SystemSkill(memory),
             HistorySkill(memory),
             ProviderSkill(memory),
+            self.scheduler_skill,
 
             # Workflow must come before terminal
             # so paused workflows can resume.
@@ -60,6 +72,26 @@ class SkillRegistry:
         self.workflow_skill.connect(
             skill_manager
         )
+
+        self.scheduler_skill.connect(
+            skill_manager
+        )
+
+    # ---------------------------------
+    # SCHEDULER LIFECYCLE
+    # ---------------------------------
+
+    def start_background_services(
+        self
+    ):
+
+        self.scheduler_skill.start()
+
+    def stop_background_services(
+        self
+    ):
+
+        self.scheduler_skill.stop()
 
     # ---------------------------------
     # GET SKILL

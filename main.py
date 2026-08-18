@@ -7,6 +7,7 @@ VERSION = "0.9.1 Intent Analyzer"
 
 
 def boot():
+
     print("=" * 50)
     print("                AETHER")
     print(f"              Version {VERSION}")
@@ -35,22 +36,49 @@ def main():
     boot()
 
     memory = Memory()
-    brain = Brain(memory)
 
-    while True:
+    brain = Brain(
+        memory
+    )
 
-        user_input = input("You: ")
+    brain.skill_manager.start_background_services()
 
-        if user_input.lower() == "exit":
-            print("Aether: Goodbye.")
-            break
+    try:
 
-        memory.remember(user_input)
+        while True:
 
-        response = brain.think(user_input)
+            user_input = input(
+                "You: "
+            )
 
-        print(response)
+            if (
+                user_input.lower()
+                == "exit"
+            ):
+
+                print(
+                    "Aether: Goodbye."
+                )
+
+                break
+
+            memory.remember(
+                user_input
+            )
+
+            response = brain.think(
+                user_input
+            )
+
+            print(
+                response
+            )
+
+    finally:
+
+        brain.skill_manager.stop_background_services()
 
 
 if __name__ == "__main__":
+
     main()
