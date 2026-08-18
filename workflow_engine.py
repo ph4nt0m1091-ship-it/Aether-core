@@ -1,3 +1,5 @@
+from execution_ledger import ExecutionLedger
+
 from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
 from providers.provider_manager import ProviderManager
@@ -14,6 +16,7 @@ class WorkflowEngine:
     - capability providers
     - permission-aware terminal pauses
     - persistent workflow state
+    - persistent execution history
     """
 
     def __init__(
@@ -35,6 +38,8 @@ class WorkflowEngine:
 
         self.store = WorkflowStore()
 
+        self.ledger = ExecutionLedger()
+
     # ---------------------------------
     # EXECUTE WORKFLOW
     # ---------------------------------
@@ -45,6 +50,7 @@ class WorkflowEngine:
     ):
 
         workflow.status = "running"
+
         workflow.touch()
 
         self.store.save(
@@ -54,6 +60,16 @@ class WorkflowEngine:
         while workflow.has_next_step():
 
             step = workflow.next_step()
+
+            # ---------------------------------
+            # RECORD START
+            # ---------------------------------
+
+            self.ledger.record(
+                workflow.workflow_id,
+                step,
+                status="started"
+            )
 
             result = self._execute_step(
                 step
@@ -67,12 +83,17 @@ class WorkflowEngine:
                 "paused"
             ):
 
-                # The step did not actually execute yet.
-                # Rewind so it is still the next step
-                # after a restart or explicit resume.
+                self.ledger.record(
+                    workflow.workflow_id,
+                    step,
+                    result=result,
+                    status="paused"
+                )
+
                 workflow.rewind_one_step()
 
                 workflow.status = "paused"
+
                 workflow.touch()
 
                 self.store.save(
@@ -99,6 +120,22 @@ class WorkflowEngine:
                 result
             )
 
+            result_status = (
+                "completed"
+                if result.get(
+                    "success",
+                    False
+                )
+                else "failed"
+            )
+
+            self.ledger.record(
+                workflow.workflow_id,
+                step,
+                result=result,
+                status=result_status
+            )
+
             self.store.save(
                 workflow
             )
@@ -113,6 +150,7 @@ class WorkflowEngine:
             ):
 
                 workflow.status = "failed"
+
                 workflow.touch()
 
                 self.store.save(
@@ -128,6 +166,7 @@ class WorkflowEngine:
                 }
 
         workflow.status = "completed"
+
         workflow.touch()
 
         self.store.save(
@@ -191,6 +230,7 @@ class WorkflowEngine:
 
                 return {
                     "success": False,
+                    "paused": False,
                     "type": "skill",
                     "action": action,
                     "error": (
@@ -249,7 +289,9 @@ class WorkflowEngine:
             )
 
             result["type"] = "provider"
+
             result["action"] = action
+
             result["paused"] = False
 
             return result

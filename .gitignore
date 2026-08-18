@@ -12,3 +12,5 @@ venv/
 # Operating System
 .DS_Store
 Thumbs.db
+storage/workflows.json
+storage/execution_history.json
