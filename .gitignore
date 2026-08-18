@@ -15,3 +15,6 @@ Thumbs.db
 storage/workflows.json
 storage/execution_history.json
 storage/scheduled_jobs.json
+storage/scheduler_runtime.lock
+storage/background_runtime.log
+storage/background_runtime.pid

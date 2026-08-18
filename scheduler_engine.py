@@ -1,8 +1,8 @@
 import threading
-import time
 
 from datetime import datetime, timedelta
 
+from runtime_lock import RuntimeLock
 from scheduler_store import SchedulerStore
 
 
@@ -12,8 +12,11 @@ class SchedulerEngine:
 
     SchedulerEngine decides WHEN work becomes due.
 
-    Actual work is still executed through
-    Aether's existing WorkflowSkill.
+    Actual work continues through Aether's existing
+    WorkflowSkill and WorkflowEngine.
+
+    A process-wide lock guarantees that only one
+    scheduler worker may be active at a time.
     """
 
     CHECK_INTERVAL = 1.0
@@ -31,11 +34,17 @@ class SchedulerEngine:
             SchedulerStore()
         )
 
+        self.runtime_lock = (
+            RuntimeLock()
+        )
+
         self._thread = None
 
         self._stop_event = (
             threading.Event()
         )
+
+        self.is_owner = False
 
     # ---------------------------------
     # START
@@ -50,7 +59,15 @@ class SchedulerEngine:
             and self._thread.is_alive()
         ):
 
+            return True
+
+        if not self.runtime_lock.acquire():
+
+            self.is_owner = False
+
             return False
+
+        self.is_owner = True
 
         self._stop_event.clear()
 
@@ -83,6 +100,12 @@ class SchedulerEngine:
                 timeout=2
             )
 
+        if self.is_owner:
+
+            self.runtime_lock.release()
+
+        self.is_owner = False
+
     # ---------------------------------
     # WORKER
     # ---------------------------------
@@ -91,22 +114,32 @@ class SchedulerEngine:
         self
     ):
 
-        while not self._stop_event.is_set():
+        try:
 
-            try:
+            while not self._stop_event.is_set():
 
-                self.run_due_jobs()
+                try:
 
-            except Exception as error:
+                    self.run_due_jobs()
 
-                print(
-                    "\nAether Scheduler error: "
-                    f"{error}"
+                except Exception as error:
+
+                    print(
+                        "\nAether Scheduler error: "
+                        f"{error}"
+                    )
+
+                self._stop_event.wait(
+                    self.CHECK_INTERVAL
                 )
 
-            self._stop_event.wait(
-                self.CHECK_INTERVAL
-            )
+        finally:
+
+            if self.is_owner:
+
+                self.runtime_lock.release()
+
+                self.is_owner = False
 
     # ---------------------------------
     # RUN DUE JOBS
@@ -161,7 +194,7 @@ class SchedulerEngine:
             )
 
     # ---------------------------------
-    # RUN ONE
+    # RUN JOB
     # ---------------------------------
 
     def _run_job(
@@ -169,9 +202,11 @@ class SchedulerEngine:
         job
     ):
 
-        # Advance or disable the schedule BEFORE
-        # execution so a long-running task cannot
-        # accidentally trigger twice.
+        # Advance or disable the schedule before
+        # execution. This prevents the same job
+        # from becoming due repeatedly while a
+        # long-running workflow is executing.
+
         if job.recurrence == "daily":
 
             previous_due = (
@@ -279,8 +314,10 @@ class SchedulerEngine:
 
         print(
             response
-            or "Aether Scheduler: "
-               "Job returned no response."
+            or (
+                "Aether Scheduler: "
+                "Job returned no response."
+            )
         )
 
         print(
