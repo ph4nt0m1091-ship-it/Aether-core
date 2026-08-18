@@ -4,11 +4,17 @@ from datetime import datetime
 
 class GoalOrchestrator:
     """
-    Converts higher-level user goals into canonical
-    Aether workflow requests.
+    Converts higher-level natural-language goals into
+    canonical Aether workflow requests.
 
-    The orchestrator plans work only.
-    It does not execute commands directly.
+    GoalOrchestrator plans work only.
+
+    It does NOT:
+    - execute commands directly
+    - bypass permissions
+    - modify the computer itself
+
+    Execution remains inside Aether's Workflow Engine.
     """
 
     DIRECT_PREFIXES = (
@@ -26,23 +32,22 @@ class GoalOrchestrator:
         "ask ollama ",
         "calculate ",
         "create project ",
-        "set goal "
+        "set goal ",
+        "plan "
     )
 
-    FOLLOWUP_WORDS = (
+    RESEARCH_PHRASES = (
+        "research ",
+        "look into ",
+        "find out about ",
+        "investigate "
+    )
+
+    SUMMARY_WORDS = (
         "summarize",
         "summary",
-        "compare",
-        "analyze",
-        "analyse",
-        "evaluate",
-        "recommend",
-        "best option",
-        "best options",
-        "save",
-        "report",
-        "write",
-        "open"
+        "brief",
+        "report"
     )
 
     ANALYSIS_WORDS = (
@@ -51,8 +56,24 @@ class GoalOrchestrator:
         "analyse",
         "evaluate",
         "recommend",
+        "recommendation",
         "best option",
-        "best options"
+        "best options",
+        "pick the best",
+        "choose the best",
+        "which is better",
+        "which one is better"
+    )
+
+    SAVE_WORDS = (
+        "save ",
+        "save it",
+        "save me",
+        "save the",
+        "write a report",
+        "write me a report",
+        "make me a report",
+        "create a report"
     )
 
     # ---------------------------------
@@ -71,61 +92,78 @@ class GoalOrchestrator:
 
         lower = message.lower()
 
+        # Explicit commands continue through
+        # their existing systems.
         if lower.startswith(
             self.DIRECT_PREFIXES
         ):
             return False
 
-        # A basic "research X" request should stay
-        # with ResearchSkill unless it asks for
-        # additional work afterward.
-        if lower.startswith(
-            "research "
-        ):
+        has_research = self._contains_any(
+            lower,
+            self.RESEARCH_PHRASES
+        )
 
-            return any(
-                word in lower
-                for word in self.FOLLOWUP_WORDS
+        has_summary = self._contains_any(
+            lower,
+            self.SUMMARY_WORDS
+        )
+
+        has_analysis = self._contains_any(
+            lower,
+            self.ANALYSIS_WORDS
+        )
+
+        has_save = self._contains_any(
+            lower,
+            self.SAVE_WORDS
+        )
+
+        has_open = (
+            self._extract_open_app(
+                message
             )
-
-        research_phrases = (
-            "research ",
-            "look into ",
-            "find out about ",
-            "investigate "
+            is not None
         )
 
-        has_research = any(
-            phrase in lower
-            for phrase in research_phrases
-        )
-
-        has_followup = any(
-            word in lower
-            for word in self.FOLLOWUP_WORDS
-        )
-
-        if has_research and has_followup:
+        # Research plus another requested action
+        # should become a workflow.
+        if (
+            has_research
+            and (
+                has_summary
+                or has_analysis
+                or has_save
+                or has_open
+            )
+        ):
             return True
 
-        has_analysis = any(
-            word in lower
-            for word in self.ANALYSIS_WORDS
-        )
-
-        has_output = any(
-            word in lower
-            for word in (
-                "save",
-                "report",
-                "write"
-            )
-        )
-
-        return (
+        # Analysis + output/action should also
+        # become a workflow.
+        if (
             has_analysis
-            and has_output
-        )
+            and (
+                has_save
+                or has_open
+            )
+        ):
+            return True
+
+        # Summarization + save/open can be planned
+        # even when the user did not explicitly
+        # use the word "research".
+        if (
+            has_summary
+            and (
+                has_save
+                or has_open
+            )
+            and has_research
+        ):
+            return True
+
+        return False
 
     # ---------------------------------
     # BUILD PLAN
@@ -155,6 +193,30 @@ class GoalOrchestrator:
         analysis_step_number = None
 
         # ---------------------------------
+        # DETECT REQUEST TYPE
+        # ---------------------------------
+
+        wants_summary = (
+            self._contains_any(
+                lower,
+                self.SUMMARY_WORDS
+            )
+        )
+
+        wants_analysis = (
+            self._contains_any(
+                lower,
+                self.ANALYSIS_WORDS
+            )
+        )
+
+        wants_save = (
+            self._wants_save(
+                lower
+            )
+        )
+
+        # ---------------------------------
         # RESEARCH STEP
         # ---------------------------------
 
@@ -176,47 +238,26 @@ class GoalOrchestrator:
             )
 
         # ---------------------------------
-        # ANALYSIS / SUMMARY STEP
+        # AI ANALYSIS STEP
         # ---------------------------------
-
-        wants_compare = (
-            "compare" in lower
-        )
-
-        wants_analysis = any(
-            word in lower
-            for word in (
-                "analyze",
-                "analyse",
-                "evaluate",
-                "recommend",
-                "best option",
-                "best options"
-            )
-        )
-
-        wants_summary = any(
-            word in lower
-            for word in (
-                "summarize",
-                "summary",
-                "report"
-            )
-        )
 
         if research_step_number:
 
-            if (
-                wants_compare
-                or wants_analysis
-            ):
+            research_reference = (
+                f"{{{{step."
+                f"{research_step_number}"
+                f".summary}}}}"
+            )
+
+            if wants_analysis:
 
                 prompt = (
-                    "analyze and compare this research. "
-                    "Identify the strongest options, "
-                    "important tradeoffs, and give a "
-                    "concise recommendation:\n\n"
-                    f"{{{{step.{research_step_number}.summary}}}}"
+                    "Analyze and compare the following "
+                    "research directly. Identify the strongest "
+                    "options, important tradeoffs, and give a "
+                    "concise recommendation. Do not describe "
+                    "your reasoning process.\n\n"
+                    + research_reference
                 )
 
                 steps.append(
@@ -231,9 +272,10 @@ class GoalOrchestrator:
             elif wants_summary:
 
                 prompt = (
-                    "summarize this research in "
-                    "three concise bullet points:\n\n"
-                    f"{{{{step.{research_step_number}.summary}}}}"
+                    "Summarize the following research "
+                    "in three concise bullet points. "
+                    "Return only the useful summary.\n\n"
+                    + research_reference
                 )
 
                 steps.append(
@@ -249,22 +291,24 @@ class GoalOrchestrator:
         # ANALYSIS WITHOUT RESEARCH
         # ---------------------------------
 
-        elif (
-            wants_compare
-            or wants_analysis
-        ):
+        elif wants_analysis:
 
-            cleaned_goal = (
+            analysis_goal = (
                 self._clean_analysis_goal(
                     goal
                 )
             )
 
-            if cleaned_goal:
+            if analysis_goal:
 
                 steps.append(
                     "ask ollama "
-                    + cleaned_goal
+                    + (
+                        "Answer directly and give a concise "
+                        "recommendation when appropriate. "
+                        "Do not describe your reasoning process.\n\n"
+                        + analysis_goal
+                    )
                 )
 
                 analysis_step_number = (
@@ -272,12 +316,10 @@ class GoalOrchestrator:
                 )
 
         # ---------------------------------
-        # SAVE RESULT
+        # SAVE STEP
         # ---------------------------------
 
-        if self._wants_save(
-            lower
-        ):
+        if wants_save:
 
             filename = (
                 self._extract_filename(
@@ -317,7 +359,7 @@ class GoalOrchestrator:
                 )
 
         # ---------------------------------
-        # OPEN APPLICATION
+        # OPEN APPLICATION STEP
         # ---------------------------------
 
         app = self._extract_open_app(
@@ -340,7 +382,7 @@ class GoalOrchestrator:
             return {
                 "success": False,
                 "error": (
-                    "The request does not need "
+                    "The request does not require "
                     "a multi-step workflow."
                 )
             }
@@ -364,7 +406,7 @@ class GoalOrchestrator:
         }
 
     # ---------------------------------
-    # EXTRACT RESEARCH TOPIC
+    # RESEARCH TOPIC
     # ---------------------------------
 
     def _extract_research_topic(
@@ -418,25 +460,45 @@ class GoalOrchestrator:
                 + len("research "):
             ]
 
+        # Everything after one of these phrases
+        # belongs to another workflow action.
         separators = (
             r",\s*summarize\b",
             r"\s+and\s+summarize\b",
+
             r",\s*compare\b",
             r"\s+and\s+compare\b",
+
             r",\s*analyze\b",
             r"\s+and\s+analyze\b",
+
             r",\s*analyse\b",
             r"\s+and\s+analyse\b",
+
             r",\s*evaluate\b",
             r"\s+and\s+evaluate\b",
+
             r",\s*recommend\b",
             r"\s+and\s+recommend\b",
+
+            r",\s*pick\s+the\s+best\b",
+            r"\s+and\s+pick\s+the\s+best\b",
+
+            r",\s*choose\s+the\s+best\b",
+            r"\s+and\s+choose\s+the\s+best\b",
+
             r",\s*save\b",
             r"\s+and\s+save\b",
+
             r",\s*write\b",
             r"\s+and\s+write\b",
+
             r",\s*make\s+me\s+a\s+report\b",
             r"\s+and\s+make\s+me\s+a\s+report\b",
+
+            r",\s*create\s+a\s+report\b",
+            r"\s+and\s+create\s+a\s+report\b",
+
             r",\s*open\b",
             r"\s+and\s+open\b"
         )
@@ -483,19 +545,9 @@ class GoalOrchestrator:
         lower
     ):
 
-        save_phrases = (
-            "save ",
-            "save me",
-            "save it",
-            "save the",
-            "make me a report",
-            "write a report",
-            "write me a report"
-        )
-
-        return any(
-            phrase in lower
-            for phrase in save_phrases
+        return self._contains_any(
+            lower,
+            self.SAVE_WORDS
         )
 
     def _extract_filename(
@@ -511,6 +563,10 @@ class GoalOrchestrator:
             (
                 r"\b(?:report|file)\s+"
                 r"(?:called|named)\s+"
+                r"([^\s,]+?\.(?:txt|md|json))\b"
+            ),
+            (
+                r"\bas\s+"
                 r"([^\s,]+?\.(?:txt|md|json))\b"
             )
         )
@@ -580,7 +636,7 @@ class GoalOrchestrator:
         return app
 
     # ---------------------------------
-    # CLEAN ANALYSIS REQUEST
+    # CLEAN ANALYSIS GOAL
     # ---------------------------------
 
     def _clean_analysis_goal(
@@ -588,20 +644,59 @@ class GoalOrchestrator:
         goal
     ):
 
-        parts = re.split(
-            (
-                r"\s+(?:and\s+)?"
-                r"(?:save|write|"
-                r"make\s+me\s+a\s+report)\b"
-            ),
-            goal,
-            maxsplit=1,
-            flags=re.IGNORECASE
+        text = goal.strip()
+
+        # Remove trailing artifact/app instructions.
+        split_patterns = (
+            r"\s+and\s+save\b",
+            r",\s*save\b",
+            r"\s+and\s+write\b",
+            r",\s*write\b",
+            r"\s+and\s+make\s+me\s+a\s+report\b",
+            r",\s*make\s+me\s+a\s+report\b",
+            r"\s+and\s+open\b",
+            r",\s*open\b"
         )
 
-        return (
-            parts[0]
-            .strip(
-                " ,."
+        earliest = len(
+            text
+        )
+
+        for pattern in split_patterns:
+
+            match = re.search(
+                pattern,
+                text,
+                re.IGNORECASE
             )
+
+            if (
+                match
+                and match.start()
+                < earliest
+            ):
+
+                earliest = (
+                    match.start()
+                )
+
+        return text[
+            :earliest
+        ].strip(
+            " ,."
+        )
+
+    # ---------------------------------
+    # UTILITY
+    # ---------------------------------
+
+    def _contains_any(
+        self,
+        text,
+        phrases
+    ):
+
+        return any(
+            phrase in text
+            for phrase in phrases
         )
