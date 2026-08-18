@@ -14,6 +14,7 @@ class WorkflowEngine:
     Supports:
     - Aether skills
     - capability providers
+    - external AI provider failure propagation
     - permission-aware terminal pauses
     - persistent workflow state
     - persistent execution history
@@ -255,7 +256,9 @@ class WorkflowEngine:
 
                 if (
                     terminal_skill is not None
-                    and terminal_skill.permissions.has_pending()
+                    and terminal_skill
+                    .permissions
+                    .has_pending()
                 ):
 
                     return {
@@ -265,6 +268,66 @@ class WorkflowEngine:
                         "action": action,
                         "response": response
                     }
+
+            # ---------------------------------
+            # PROVIDER SKILL RESULT
+            # ---------------------------------
+            #
+            # ProviderSkill returns human-readable
+            # text to the conversation, but also
+            # preserves the actual structured
+            # provider result.
+            #
+            # This prevents errors such as:
+            #
+            # "Ollama generation failed"
+            # being recorded as a successful
+            # workflow step.
+
+            if action == "providers":
+
+                provider_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "providers"
+                    )
+                )
+
+                if provider_skill is not None:
+
+                    provider_result = getattr(
+                        provider_skill,
+                        "last_execution_result",
+                        None
+                    )
+
+                    if (
+                        provider_result is not None
+                        and not provider_result.get(
+                            "success",
+                            False
+                        )
+                    ):
+
+                        return {
+                            "success": False,
+                            "paused": False,
+                            "type": "skill",
+                            "action": action,
+                            "response": response,
+                            "provider": (
+                                provider_result.get(
+                                    "provider"
+                                )
+                            ),
+                            "error": (
+                                provider_result.get(
+                                    "error",
+                                    response
+                                )
+                            )
+                        }
 
             return {
                 "success": True,

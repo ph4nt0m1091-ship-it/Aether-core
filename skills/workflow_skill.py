@@ -8,6 +8,7 @@ class WorkflowSkill:
 
     Workflows can:
     - Execute multiple skills/providers
+    - Use external AI providers through Aether skills
     - Pause for terminal permission
     - Resume after approval
     - Survive Aether restarts
@@ -20,7 +21,8 @@ class WorkflowSkill:
 
     description = (
         "Coordinates persistent multi-step Aether workflows "
-        "that can pause, resume, and recover after restarts."
+        "that can use external providers, pause, resume, "
+        "and recover after restarts."
     )
 
     def __init__(
@@ -30,7 +32,6 @@ class WorkflowSkill:
     ):
 
         self.memory = memory
-
         self.skill_manager = skill_manager
 
         self.engine = None
@@ -92,7 +93,6 @@ class WorkflowSkill:
     ):
 
         message = message.strip()
-
         lower = message.lower()
 
         # ---------------------------------
@@ -641,6 +641,64 @@ class WorkflowSkill:
                 workflow.add_step(
                     "skill",
                     "terminal",
+                    {
+                        "message": part
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # OLLAMA PROVIDER
+            # -------------------------
+
+            if lower.startswith(
+                "ask ollama "
+            ):
+
+                workflow.add_step(
+                    "skill",
+                    "providers",
+                    {
+                        "message": part
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # SHOW OLLAMA MODELS
+            # -------------------------
+
+            if lower in (
+                "show ollama models",
+                "list ollama models",
+                "ollama models"
+            ):
+
+                workflow.add_step(
+                    "skill",
+                    "providers",
+                    {
+                        "message": part
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # PROVIDER STATUS
+            # -------------------------
+
+            if lower in (
+                "show providers",
+                "list providers",
+                "show provider capabilities"
+            ):
+
+                workflow.add_step(
+                    "skill",
+                    "providers",
                     {
                         "message": part
                     }

@@ -1,3 +1,5 @@
+from model_router import ModelRouter
+
 from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
 from providers.ollama_provider import OllamaProvider
@@ -12,7 +14,8 @@ class ProviderSkill:
     - Show available providers
     - Show provider capabilities
     - Show installed Ollama models
-    - Send prompts to local Ollama models
+    - Automatically route local AI requests
+    - Explicitly select Ollama models
     """
 
     name = "providers"
@@ -30,6 +33,15 @@ class ProviderSkill:
         self.memory = memory
 
         self.manager = ProviderManager()
+
+        self.router = ModelRouter()
+
+        # Stores structured information about
+        # the most recent provider execution.
+        #
+        # WorkflowEngine uses this to distinguish
+        # real provider failures from normal text.
+        self.last_execution_result = None
 
         self.manager.register(
             AetherProvider()
@@ -51,6 +63,10 @@ class ProviderSkill:
         self,
         message
     ):
+
+        # Never allow an old execution result
+        # to affect a new request.
+        self.last_execution_result = None
 
         message = message.strip()
         lower = message.lower()
@@ -269,12 +285,13 @@ class ProviderSkill:
         if not request:
 
             return (
-                "Aether: Tell me which Ollama "
-                "model and prompt to use.\n\n"
-                "Example:\n"
-                "ask ollama qwen3:4b "
-                "explain what a motor driver is"
+                "Aether: Tell me what you "
+                "would like the local AI to do."
             )
+
+        # ---------------------------------
+        # GET INSTALLED MODELS
+        # ---------------------------------
 
         model_result = self.manager.execute(
             "list_models",
@@ -285,6 +302,10 @@ class ProviderSkill:
         if not model_result.get(
             "success"
         ):
+
+            self.last_execution_result = (
+                model_result
+            )
 
             return (
                 "Aether: Ollama is unavailable.\n"
@@ -299,10 +320,10 @@ class ProviderSkill:
         )
 
         # ---------------------------------
-        # DETECT MODEL
+        # EXPLICIT MODEL DETECTION
         # ---------------------------------
 
-        model = None
+        requested_model = None
         prompt = request
 
         for installed_model in (
@@ -318,7 +339,7 @@ class ProviderSkill:
                 prefix.lower()
             ):
 
-                model = (
+                requested_model = (
                     installed_model
                 )
 
@@ -328,50 +349,37 @@ class ProviderSkill:
 
                 break
 
-        # ---------------------------------
-        # FALLBACK MODEL
-        # ---------------------------------
-
-        if model is None:
-
-            preferred_models = [
-                "qwen3:4b",
-                "gemma3:1b",
-                "qwen3:8b"
-            ]
-
-            for preferred in (
-                preferred_models
-            ):
-
-                if preferred in installed_models:
-
-                    model = preferred
-
-                    break
-
-            if (
-                model is None
-                and installed_models
-            ):
-
-                model = (
-                    installed_models[0]
-                )
-
-        if model is None:
-
-            return (
-                "Aether: I couldn't find "
-                "an installed Ollama model."
-            )
-
         if not prompt:
 
             return (
-                f"Aether: What would you like "
-                f"me to ask {model}?"
+                "Aether: What would you "
+                "like the model to do?"
             )
+
+        # ---------------------------------
+        # ROUTE MODEL
+        # ---------------------------------
+
+        route = self.router.choose(
+            prompt,
+            installed_models,
+            requested_model=(
+                requested_model
+            )
+        )
+
+        if not route.get(
+            "success"
+        ):
+
+            self.last_execution_result = (
+                route
+            )
+
+            return (
+                "Aether: Model routing failed.\n"
+                f"{route.get('error', '')}"
+            ).rstrip()
 
         # ---------------------------------
         # GENERATE
@@ -380,10 +388,30 @@ class ProviderSkill:
         result = self.manager.execute(
             "generate_text",
             {
-                "model": model,
-                "prompt": prompt
+                "model": (
+                    route["model"]
+                ),
+                "prompt": (
+                    route["prompt"]
+                ),
+                "think": (
+                    route["think"]
+                ),
+                "num_ctx": (
+                    route["num_ctx"]
+                ),
+                "num_predict": (
+                    route["num_predict"]
+                ),
+                "keep_alive": (
+                    route["keep_alive"]
+                )
             },
             provider_name="ollama"
+        )
+
+        self.last_execution_result = (
+            result
         )
 
         if not result.get(
@@ -408,8 +436,9 @@ class ProviderSkill:
             )
 
         return (
-            f"Aether: Ollama response "
-            f"from {model}:\n\n"
+            "Aether: Local AI response\n"
+            f"Model: {route['model']}\n"
+            f"Tier: {route['tier']}\n\n"
             f"{response}"
         )
 
