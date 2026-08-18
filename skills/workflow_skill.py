@@ -10,8 +10,8 @@ class WorkflowSkill:
 
     Workflows can:
     - Execute multiple skills/providers
-    - Use external AI providers through Aether skills
-    - Pass results between workflow steps
+    - Use external AI providers
+    - Pass structured data between workflow steps
     - Reference previous or specific step results
     - Save workflow results to files
     - Pause for terminal permission
@@ -26,8 +26,8 @@ class WorkflowSkill:
 
     description = (
         "Coordinates persistent multi-step Aether workflows "
-        "that can pass data between steps, use external "
-        "providers, pause, resume, and recover after restarts."
+        "with structured data passing, external providers, "
+        "permissions, persistence, and recovery."
     )
 
     def __init__(
@@ -41,12 +41,7 @@ class WorkflowSkill:
 
         self.engine = None
 
-        # Workflow currently waiting for
-        # an in-memory permission response.
         self.pending_workflow = None
-
-        # Workflow discovered from persistent
-        # storage after Aether starts.
         self.recovered_workflow = None
 
     # ---------------------------------
@@ -68,10 +63,6 @@ class WorkflowSkill:
             self.engine.latest_unfinished()
         )
 
-        # A workflow that was "running" when
-        # Aether stopped should be considered
-        # recoverable rather than automatically
-        # continuing without the user.
         if (
             self.recovered_workflow is not None
             and self.recovered_workflow.status
@@ -124,7 +115,7 @@ class WorkflowSkill:
             return self._workflow_status()
 
         # ---------------------------------
-        # RESUME SAVED WORKFLOW
+        # RESUME WORKFLOW
         # ---------------------------------
 
         if lower in (
@@ -137,7 +128,7 @@ class WorkflowSkill:
             return self._resume_saved_workflow()
 
         # ---------------------------------
-        # CANCEL SAVED WORKFLOW
+        # CANCEL WORKFLOW
         # ---------------------------------
 
         if lower in (
@@ -250,11 +241,6 @@ class WorkflowSkill:
             workflow
         )
 
-        # Engine execution will recreate any
-        # required terminal permission request.
-        #
-        # A previously granted permission is
-        # intentionally NOT restored.
         result = self.engine.execute(
             workflow
         )
@@ -327,7 +313,6 @@ class WorkflowSkill:
             )
         )
 
-        # User did not provide a valid yes/no yet.
         if (
             terminal_skill
             .permissions
@@ -368,20 +353,12 @@ class WorkflowSkill:
             )
 
         # ---------------------------------
-        # THE PAUSED STEP WAS ATTEMPTED
+        # ADVANCE PAST APPROVED STEP
         # ---------------------------------
-        #
-        # WorkflowEngine rewinds a step when
-        # permission is required.
-        #
-        # TerminalSkill has now executed that
-        # command after approval, so advance the
-        # workflow past that step before continuing.
 
         if workflow.has_next_step():
 
             workflow.current_step += 1
-
             workflow.touch()
 
         # ---------------------------------
@@ -460,7 +437,6 @@ class WorkflowSkill:
 
         self.pending_workflow = None
 
-        # Continue remaining steps.
         result = self.engine.execute(
             workflow
         )
@@ -684,7 +660,10 @@ class WorkflowSkill:
 
             save_match = re.match(
                 r"^save\s+"
-                r"(\{\{previous\}\}|\{\{step\.\d+\}\})"
+                r"(\{\{"
+                r"(?:previous|step\.\d+)"
+                r"(?:\.[a-zA-Z0-9_\.]+)?"
+                r"\}\})"
                 r"\s+to\s+(.+)$",
                 part,
                 re.IGNORECASE
@@ -708,7 +687,9 @@ class WorkflowSkill:
                     {
                         "operation": "write_text",
                         "filename": filename,
-                        "content": content_reference
+                        "content": (
+                            content_reference
+                        )
                     }
                 )
 
@@ -741,7 +722,7 @@ class WorkflowSkill:
                 continue
 
             # -------------------------
-            # OLLAMA PROVIDER
+            # OLLAMA
             # -------------------------
 
             if lower.startswith(
@@ -759,7 +740,7 @@ class WorkflowSkill:
                 continue
 
             # -------------------------
-            # SHOW OLLAMA MODELS
+            # OLLAMA MODELS
             # -------------------------
 
             if lower in (
@@ -934,9 +915,7 @@ class WorkflowSkill:
                 "success"
             ):
 
-                output += (
-                    "complete\n"
-                )
+                output += "complete\n"
 
                 response = item.get(
                     "response"
@@ -978,9 +957,7 @@ class WorkflowSkill:
 
             else:
 
-                output += (
-                    "failed\n"
-                )
+                output += "failed\n"
 
                 output += (
                     item.get(

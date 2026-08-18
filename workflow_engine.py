@@ -14,9 +14,9 @@ class WorkflowEngine:
     Supports:
     - Aether skills
     - capability providers
-    - workflow result references
-    - direct structured skill execution
-    - external AI provider failure propagation
+    - structured workflow results
+    - workflow field references
+    - external AI failure propagation
     - permission-aware terminal pauses
     - persistent workflow state
     - persistent execution history
@@ -27,9 +27,13 @@ class WorkflowEngine:
         skill_manager
     ):
 
-        self.skill_manager = skill_manager
+        self.skill_manager = (
+            skill_manager
+        )
 
-        self.providers = ProviderManager()
+        self.providers = (
+            ProviderManager()
+        )
 
         self.providers.register(
             AetherProvider()
@@ -39,9 +43,13 @@ class WorkflowEngine:
             LocalSystemProvider()
         )
 
-        self.store = WorkflowStore()
+        self.store = (
+            WorkflowStore()
+        )
 
-        self.ledger = ExecutionLedger()
+        self.ledger = (
+            ExecutionLedger()
+        )
 
     # ---------------------------------
     # EXECUTE WORKFLOW
@@ -92,7 +100,9 @@ class WorkflowEngine:
 
                 workflow.rewind_one_step()
 
-                workflow.status = "paused"
+                workflow.status = (
+                    "paused"
+                )
 
                 workflow.touch()
 
@@ -104,17 +114,19 @@ class WorkflowEngine:
                     "success": True,
                     "paused": True,
                     "status": "paused",
-                    "progress": workflow.progress(),
-                    "permission_message": result.get(
-                        "response",
-                        ""
+                    "progress": (
+                        workflow.progress()
                     ),
-                    "results": workflow.results
+                    "permission_message": (
+                        result.get(
+                            "response",
+                            ""
+                        )
+                    ),
+                    "results": (
+                        workflow.results
+                    )
                 }
-
-            # ---------------------------------
-            # RECORD RESULT
-            # ---------------------------------
 
             workflow.add_result(
                 result
@@ -140,16 +152,14 @@ class WorkflowEngine:
                 workflow
             )
 
-            # ---------------------------------
-            # FAILURE
-            # ---------------------------------
-
             if not result.get(
                 "success",
                 False
             ):
 
-                workflow.status = "failed"
+                workflow.status = (
+                    "failed"
+                )
 
                 workflow.touch()
 
@@ -160,9 +170,13 @@ class WorkflowEngine:
                 return {
                     "success": False,
                     "paused": False,
-                    "status": workflow.status,
-                    "progress": workflow.progress(),
-                    "results": workflow.results
+                    "status": "failed",
+                    "progress": (
+                        workflow.progress()
+                    ),
+                    "results": (
+                        workflow.results
+                    )
                 }
 
         workflow.status = "completed"
@@ -178,7 +192,9 @@ class WorkflowEngine:
             "paused": False,
             "status": "completed",
             "progress": 100,
-            "results": workflow.results
+            "results": (
+                workflow.results
+            )
         }
 
     # ---------------------------------
@@ -210,7 +226,7 @@ class WorkflowEngine:
         )
 
         # ---------------------------------
-        # RESOLVE WORKFLOW REFERENCES
+        # RESOLVE REFERENCES
         # ---------------------------------
 
         try:
@@ -244,10 +260,6 @@ class WorkflowEngine:
             # ---------------------------------
             # DIRECT STRUCTURED SKILL
             # ---------------------------------
-            #
-            # A skill step without a "message"
-            # is executed through the skill's
-            # structured execute() interface.
 
             if "message" not in data:
 
@@ -277,11 +289,15 @@ class WorkflowEngine:
                     ""
                 )
 
-                skill_result = skill.execute(
-                    {
-                        "action": operation,
-                        "data": data
-                    }
+                skill_result = (
+                    skill.execute(
+                        {
+                            "action": (
+                                operation
+                            ),
+                            "data": data
+                        }
+                    )
                 )
 
                 if skill_result is None:
@@ -292,8 +308,8 @@ class WorkflowEngine:
                         "type": "skill",
                         "action": action,
                         "error": (
-                            f'Skill "{action}" returned '
-                            "no execution result."
+                            f'Skill "{action}" '
+                            "returned no result."
                         )
                     }
 
@@ -353,7 +369,7 @@ class WorkflowEngine:
                 }
 
             # ---------------------------------
-            # TERMINAL PERMISSION
+            # TERMINAL
             # ---------------------------------
 
             if action == "terminal":
@@ -382,7 +398,103 @@ class WorkflowEngine:
                     }
 
             # ---------------------------------
-            # PROVIDER SKILL RESULT
+            # RESEARCH STRUCTURED RESULT
+            # ---------------------------------
+
+            if action == "research":
+
+                research_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "research"
+                    )
+                )
+
+                if research_skill is not None:
+
+                    structured = getattr(
+                        research_skill,
+                        "last_execution_result",
+                        None
+                    )
+
+                    if structured is not None:
+
+                        if not structured.get(
+                            "success",
+                            False
+                        ):
+
+                            return {
+                                "success": False,
+                                "paused": False,
+                                "type": "skill",
+                                "action": action,
+                                "response": (
+                                    response
+                                ),
+                                "error": (
+                                    structured.get(
+                                        "error",
+                                        response
+                                    )
+                                )
+                            }
+
+                        return {
+                            "success": True,
+                            "paused": False,
+                            "type": "skill",
+                            "action": action,
+                            "response": (
+                                response
+                            ),
+                            "query": (
+                                structured.get(
+                                    "query"
+                                )
+                            ),
+                            "summary": (
+                                structured.get(
+                                    "summary",
+                                    ""
+                                )
+                            ),
+                            "evidence_summary": (
+                                structured.get(
+                                    "evidence_summary",
+                                    ""
+                                )
+                            ),
+                            "shared_topics": (
+                                structured.get(
+                                    "shared_topics",
+                                    []
+                                )
+                            ),
+                            "sources": (
+                                structured.get(
+                                    "sources",
+                                    []
+                                )
+                            ),
+                            "source_count": (
+                                structured.get(
+                                    "source_count",
+                                    0
+                                )
+                            ),
+                            "evidence": (
+                                structured.get(
+                                    "evidence",
+                                    []
+                                )
+                            )
+                        }
+
+            # ---------------------------------
+            # PROVIDER STRUCTURED RESULT
             # ---------------------------------
 
             if action == "providers":
@@ -415,7 +527,9 @@ class WorkflowEngine:
                                 "paused": False,
                                 "type": "skill",
                                 "action": action,
-                                "response": response,
+                                "response": (
+                                    response
+                                ),
                                 "provider": (
                                     provider_result.get(
                                         "provider"
@@ -429,18 +543,23 @@ class WorkflowEngine:
                                 )
                             }
 
+                        answer = (
+                            provider_result.get(
+                                "response",
+                                ""
+                            )
+                        )
+
                         return {
                             "success": True,
                             "paused": False,
                             "type": "skill",
                             "action": action,
-                            "response": response,
-                            "output": (
-                                provider_result.get(
-                                    "response",
-                                    response
-                                )
+                            "response": (
+                                response
                             ),
+                            "answer": answer,
+                            "output": answer,
                             "provider": (
                                 provider_result.get(
                                     "provider"
@@ -450,15 +569,25 @@ class WorkflowEngine:
                                 provider_result.get(
                                     "model"
                                 )
+                            ),
+                            "capability": (
+                                provider_result.get(
+                                    "capability"
+                                )
                             )
                         }
+
+            # ---------------------------------
+            # NORMAL SKILL
+            # ---------------------------------
 
             return {
                 "success": True,
                 "paused": False,
                 "type": "skill",
                 "action": action,
-                "response": response
+                "response": response,
+                "output": response
             }
 
         # ---------------------------------
@@ -487,8 +616,8 @@ class WorkflowEngine:
             "type": step_type,
             "action": action,
             "error": (
-                f'Unknown workflow step type: '
-                f'"{step_type}"'
+                f'Unknown workflow '
+                f'step type: "{step_type}"'
             )
         }
 

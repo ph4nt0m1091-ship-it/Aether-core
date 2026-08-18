@@ -9,18 +9,20 @@ class Workflow:
     """
     Represents a sequence of actions for Aether.
 
-    Workflows are separate from predefined missions.
-    They are intended for dynamic, user-requested work.
-
-    Workflow results can be referenced by later steps:
+    Supports workflow result references:
 
     {{previous}}
+    {{previous.answer}}
     {{step.1}}
-    {{step.2}}
+    {{step.1.summary}}
+    {{step.2.model}}
     """
 
     REFERENCE_PATTERN = re.compile(
-        r"\{\{\s*(previous|step\.(\d+))\s*\}\}",
+        r"\{\{\s*"
+        r"(previous|step\.(\d+))"
+        r"(?:\.([a-zA-Z0-9_\.]+))?"
+        r"\s*\}\}",
         re.IGNORECASE
     )
 
@@ -45,15 +47,23 @@ class Workflow:
 
         self.steps = (
             steps
-            if isinstance(steps, list)
+            if isinstance(
+                steps,
+                list
+            )
             else []
         )
 
-        self.current_step = current_step
+        self.current_step = (
+            current_step
+        )
 
         self.results = (
             results
-            if isinstance(results, list)
+            if isinstance(
+                results,
+                list
+            )
             else []
         )
 
@@ -98,14 +108,18 @@ class Workflow:
     # STATE
     # ---------------------------------
 
-    def has_next_step(self):
+    def has_next_step(
+        self
+    ):
 
         return (
             self.current_step
             < len(self.steps)
         )
 
-    def peek_next_step(self):
+    def peek_next_step(
+        self
+    ):
 
         if not self.has_next_step():
 
@@ -115,7 +129,9 @@ class Workflow:
             self.current_step
         ]
 
-    def next_step(self):
+    def next_step(
+        self
+    ):
 
         if not self.has_next_step():
 
@@ -131,13 +147,9 @@ class Workflow:
 
         return step
 
-    def rewind_one_step(self):
-        """
-        Move back one step.
-
-        Used when a workflow pauses before
-        an action actually executes.
-        """
+    def rewind_one_step(
+        self
+    ):
 
         if self.current_step > 0:
 
@@ -156,7 +168,9 @@ class Workflow:
 
         self.touch()
 
-    def progress(self):
+    def progress(
+        self
+    ):
 
         total = len(
             self.steps
@@ -174,7 +188,9 @@ class Workflow:
             * 100
         )
 
-    def reset(self):
+    def reset(
+        self
+    ):
 
         self.current_step = 0
         self.results = []
@@ -193,7 +209,8 @@ class Workflow:
         if not self.results:
 
             raise ValueError(
-                "There is no previous workflow result."
+                "There is no previous "
+                "workflow result."
             )
 
         return self.results[-1]
@@ -215,7 +232,8 @@ class Workflow:
         ):
 
             raise ValueError(
-                "Workflow step reference is invalid."
+                "Workflow step reference "
+                "is invalid."
             )
 
         index = (
@@ -224,17 +242,101 @@ class Workflow:
 
         if (
             index < 0
-            or index >= len(self.results)
+            or index >= len(
+                self.results
+            )
         ):
 
             raise ValueError(
-                f"Workflow step {step_number} "
-                "does not have a result yet."
+                f"Workflow step "
+                f"{step_number} does not "
+                "have a result yet."
             )
 
         return self.results[
             index
         ]
+
+    # ---------------------------------
+    # FIELD ACCESS
+    # ---------------------------------
+
+    def _field_value(
+        self,
+        value,
+        field_path
+    ):
+
+        if not field_path:
+
+            return value
+
+        current = value
+
+        for part in (
+            field_path.split(".")
+        ):
+
+            if isinstance(
+                current,
+                dict
+            ):
+
+                if part not in current:
+
+                    raise ValueError(
+                        f'Workflow result field '
+                        f'"{field_path}" '
+                        "was not found."
+                    )
+
+                current = current[
+                    part
+                ]
+
+            elif isinstance(
+                current,
+                list
+            ):
+
+                try:
+
+                    index = int(
+                        part
+                    )
+
+                except ValueError:
+
+                    raise ValueError(
+                        f'List field "{part}" '
+                        "must be a number."
+                    )
+
+                if (
+                    index < 0
+                    or index >= len(
+                        current
+                    )
+                ):
+
+                    raise ValueError(
+                        f'List index "{index}" '
+                        "is out of range."
+                    )
+
+                current = current[
+                    index
+                ]
+
+            else:
+
+                raise ValueError(
+                    f'Cannot read field '
+                    f'"{field_path}" from '
+                    "this workflow result."
+                )
+
+        return current
 
     # ---------------------------------
     # RESULT → TEXT
@@ -256,50 +358,36 @@ class Workflow:
 
             return result
 
-        if not isinstance(
+        if isinstance(
             result,
-            dict
+            (
+                int,
+                float,
+                bool
+            )
         ):
 
             return str(
                 result
             )
 
-        # Prefer clean machine-readable output
-        # over Aether's formatted display text.
-        for key in (
-            "output",
-            "content",
-            "answer",
-            "stdout",
-            "response"
+        if isinstance(
+            result,
+            (
+                dict,
+                list
+            )
         ):
 
-            value = result.get(
-                key
+            return json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2,
+                default=str
             )
 
-            if value is not None:
-
-                if isinstance(
-                    value,
-                    str
-                ):
-
-                    return value
-
-                return json.dumps(
-                    value,
-                    ensure_ascii=False,
-                    indent=2,
-                    default=str
-                )
-
-        return json.dumps(
-            result,
-            ensure_ascii=False,
-            indent=2,
-            default=str
+        return str(
+            result
         )
 
     # ---------------------------------
@@ -352,26 +440,33 @@ class Workflow:
                 .lower()
             )
 
+            step_number = (
+                match.group(2)
+            )
+
+            field_path = (
+                match.group(3)
+            )
+
             if reference == "previous":
 
                 result = (
                     self.previous_result()
                 )
 
-                return self.result_text(
-                    result
+            else:
+
+                result = self.step_result(
+                    step_number
                 )
 
-            step_number = (
-                match.group(2)
-            )
-
-            result = self.step_result(
-                step_number
+            selected = self._field_value(
+                result,
+                field_path
             )
 
             return self.result_text(
-                result
+                selected
             )
 
         return self.REFERENCE_PATTERN.sub(
@@ -383,17 +478,27 @@ class Workflow:
     # PERSISTENCE
     # ---------------------------------
 
-    def to_dict(self):
+    def to_dict(
+        self
+    ):
 
         return {
-            "workflow_id": self.workflow_id,
+            "workflow_id": (
+                self.workflow_id
+            ),
             "goal": self.goal,
             "steps": self.steps,
-            "current_step": self.current_step,
+            "current_step": (
+                self.current_step
+            ),
             "results": self.results,
             "status": self.status,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at
+            "created_at": (
+                self.created_at
+            ),
+            "updated_at": (
+                self.updated_at
+            )
         }
 
     @classmethod
@@ -438,19 +543,28 @@ class Workflow:
     # TIMESTAMPS
     # ---------------------------------
 
-    def touch(self):
+    def touch(
+        self
+    ):
 
         self.updated_at = (
             self._timestamp()
         )
 
-    def _timestamp(self):
+    def _timestamp(
+        self
+    ):
 
-        return datetime.now().isoformat(
-            timespec="seconds"
+        return (
+            datetime.now()
+            .isoformat(
+                timespec="seconds"
+            )
         )
 
-    def __len__(self):
+    def __len__(
+        self
+    ):
 
         return len(
             self.steps

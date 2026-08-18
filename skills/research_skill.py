@@ -6,8 +6,8 @@ class ResearchSkill:
     """
     Performs structured web research for Aether.
 
-    ResearchSkill gathers web information and sends
-    it through ResearchEngine for structured analysis.
+    ResearchSkill gathers web information, analyzes it,
+    and preserves a machine-readable result for workflows.
     """
 
     name = "research"
@@ -17,7 +17,10 @@ class ResearchSkill:
         "returns findings with supporting evidence."
     )
 
-    def __init__(self, memory):
+    def __init__(
+        self,
+        memory
+    ):
 
         self.memory = memory
 
@@ -25,11 +28,20 @@ class ResearchSkill:
 
         self.engine = ResearchEngine()
 
+        # Structured result from the most recent
+        # successful or failed research request.
+        self.last_execution_result = None
+
     # ---------------------------------
     # HANDLE
     # ---------------------------------
 
-    def handle(self, message):
+    def handle(
+        self,
+        message
+    ):
+
+        self.last_execution_result = None
 
         message = message.strip()
         lower = message.lower()
@@ -45,7 +57,9 @@ class ResearchSkill:
 
         for prefix in prefixes:
 
-            if lower.startswith(prefix):
+            if lower.startswith(
+                prefix
+            ):
 
                 query = message[
                     len(prefix):
@@ -59,22 +73,32 @@ class ResearchSkill:
 
         if not query:
 
+            self.last_execution_result = {
+                "success": False,
+                "error": (
+                    "No research topic was provided."
+                )
+            }
+
             return (
                 "Aether: What would you "
                 "like me to research?"
             )
 
         # ---------------------------------
-        # Gather Research
+        # GATHER RESEARCH
         # ---------------------------------
 
-        search_data = self.tool.search_with_answer(
-            query,
-            max_results=5
+        search_data = (
+            self.tool
+            .search_with_answer(
+                query,
+                max_results=5
+            )
         )
 
         # ---------------------------------
-        # Analyze Research
+        # ANALYZE RESEARCH
         # ---------------------------------
 
         research = self.engine.analyze(
@@ -107,7 +131,21 @@ class ResearchSkill:
             ""
         ).strip()
 
+        evidence = research.get(
+            "evidence",
+            []
+        )
+
         if not summary and not sources:
+
+            self.last_execution_result = {
+                "success": False,
+                "query": query,
+                "error": (
+                    "Not enough research information "
+                    "was found."
+                )
+            }
 
             return (
                 "Aether: I couldn't find enough "
@@ -115,16 +153,34 @@ class ResearchSkill:
             )
 
         # ---------------------------------
-        # Build Research Report
+        # STRUCTURED RESULT
+        # ---------------------------------
+
+        self.last_execution_result = {
+            "success": True,
+            "query": query,
+            "summary": summary,
+            "evidence_summary": (
+                evidence_summary
+            ),
+            "shared_topics": (
+                shared_topics
+            ),
+            "sources": sources,
+            "source_count": (
+                source_count
+            ),
+            "evidence": evidence
+        }
+
+        # ---------------------------------
+        # BUILD DISPLAY REPORT
         # ---------------------------------
 
         output = (
-            f"Aether: Researching: {query}\n\n"
+            f"Aether: Researching: "
+            f"{query}\n\n"
         )
-
-        # ---------------------------------
-        # Main Findings
-        # ---------------------------------
 
         if summary:
 
@@ -133,10 +189,6 @@ class ResearchSkill:
                 f"{summary}\n\n"
             )
 
-        # ---------------------------------
-        # Evidence Analysis
-        # ---------------------------------
-
         if evidence_summary:
 
             output += (
@@ -144,17 +196,16 @@ class ResearchSkill:
                 f"{evidence_summary}\n\n"
             )
 
-        # ---------------------------------
-        # Shared Topics
-        # ---------------------------------
-
         if shared_topics:
 
             output += (
-                "Shared topics across sources:\n"
+                "Shared topics across "
+                "sources:\n"
             )
 
-            for item in shared_topics[:5]:
+            for item in (
+                shared_topics[:5]
+            ):
 
                 topic = item.get(
                     "topic",
@@ -176,10 +227,6 @@ class ResearchSkill:
                 )
 
             output += "\n"
-
-        # ---------------------------------
-        # Sources
-        # ---------------------------------
 
         if sources:
 
@@ -223,9 +270,9 @@ class ResearchSkill:
     # EXECUTE
     # ---------------------------------
 
-    def execute(self, step):
-        """
-        ResearchSkill is not used by missions yet.
-        """
+    def execute(
+        self,
+        step
+    ):
 
         return None
