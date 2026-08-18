@@ -1,4 +1,5 @@
 from model_router import ModelRouter
+from resilience import ResiliencePolicy
 
 from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
@@ -16,14 +17,19 @@ class ProviderSkill:
     - Show installed Ollama models
     - Automatically route local AI requests
     - Explicitly select Ollama models
+    - Retry temporary AI failures safely
+    - Fall back to another local model when appropriate
     """
 
     name = "providers"
 
     description = (
         "Manages Aether's native, local-system, "
-        "and external AI providers."
+        "and external AI providers with resilient "
+        "local-model execution."
     )
+
+    MAX_PRIMARY_ATTEMPTS = 2
 
     def __init__(
         self,
@@ -36,11 +42,8 @@ class ProviderSkill:
 
         self.router = ModelRouter()
 
-        # Stores structured information about
-        # the most recent provider execution.
-        #
-        # WorkflowEngine uses this to distinguish
-        # real provider failures from normal text.
+        self.resilience = ResiliencePolicy()
+
         self.last_execution_result = None
 
         self.manager.register(
@@ -64,16 +67,10 @@ class ProviderSkill:
         message
     ):
 
-        # Never allow an old execution result
-        # to affect a new request.
         self.last_execution_result = None
 
         message = message.strip()
         lower = message.lower()
-
-        # ---------------------------------
-        # SHOW PROVIDERS
-        # ---------------------------------
 
         if lower in (
             "show providers",
@@ -84,10 +81,6 @@ class ProviderSkill:
 
             return self._show_providers()
 
-        # ---------------------------------
-        # SHOW CAPABILITIES
-        # ---------------------------------
-
         if lower in (
             "show provider capabilities",
             "provider capabilities",
@@ -95,10 +88,6 @@ class ProviderSkill:
         ):
 
             return self._show_capabilities()
-
-        # ---------------------------------
-        # OLLAMA MODELS
-        # ---------------------------------
 
         if lower in (
             "show ollama models",
@@ -108,10 +97,6 @@ class ProviderSkill:
         ):
 
             return self._show_ollama_models()
-
-        # ---------------------------------
-        # ASK OLLAMA
-        # ---------------------------------
 
         prefix = "ask ollama "
 
@@ -149,14 +134,10 @@ class ProviderSkill:
             )
 
         for provider in (
-            self.manager
-            .providers
-            .values()
+            self.manager.providers.values()
         ):
 
-            available = (
-                provider.available()
-            )
+            available = provider.available()
 
             status = (
                 "available"
@@ -190,7 +171,7 @@ class ProviderSkill:
         return output.rstrip()
 
     # ---------------------------------
-    # CAPABILITIES
+    # SHOW CAPABILITIES
     # ---------------------------------
 
     def _show_capabilities(
@@ -198,8 +179,7 @@ class ProviderSkill:
     ):
 
         capabilities = (
-            self.manager
-            .capabilities()
+            self.manager.capabilities()
         )
 
         if not capabilities:
@@ -227,7 +207,7 @@ class ProviderSkill:
         return output.rstrip()
 
     # ---------------------------------
-    # OLLAMA MODELS
+    # SHOW OLLAMA MODELS
     # ---------------------------------
 
     def _show_ollama_models(
@@ -312,11 +292,9 @@ class ProviderSkill:
                 f"{model_result.get('error', '')}"
             ).rstrip()
 
-        installed_models = (
-            model_result.get(
-                "models",
-                []
-            )
+        installed_models = model_result.get(
+            "models",
+            []
         )
 
         # ---------------------------------
@@ -381,38 +359,163 @@ class ProviderSkill:
                 f"{route.get('error', '')}"
             ).rstrip()
 
+        primary_model = route["model"]
+
         # ---------------------------------
-        # GENERATE
+        # PRIMARY ATTEMPTS
         # ---------------------------------
 
-        result = self.manager.execute(
-            "generate_text",
-            {
-                "model": (
-                    route["model"]
-                ),
-                "prompt": (
-                    route["prompt"]
-                ),
-                "think": (
-                    route["think"]
-                ),
-                "num_ctx": (
-                    route["num_ctx"]
-                ),
-                "num_predict": (
-                    route["num_predict"]
-                ),
-                "keep_alive": (
-                    route["keep_alive"]
+        attempts = []
+        result = None
+
+        for attempt_number in range(
+            1,
+            self.MAX_PRIMARY_ATTEMPTS + 1
+        ):
+
+            result = self._generate(
+                route
+            )
+
+            attempts.append(
+                {
+                    "model": primary_model,
+                    "attempt": attempt_number,
+                    "success": result.get(
+                        "success",
+                        False
+                    ),
+                    "error": result.get(
+                        "error"
+                    )
+                }
+            )
+
+            if result.get(
+                "success"
+            ):
+
+                break
+
+            if not self.resilience.can_retry(
+                "generate_text",
+                result
+            ):
+
+                break
+
+        # ---------------------------------
+        # FALLBACK MODEL
+        # ---------------------------------
+
+        fallback_used = False
+        fallback_model = None
+
+        if (
+            result is not None
+            and not result.get(
+                "success",
+                False
+            )
+            and self.resilience.can_retry(
+                "generate_text",
+                result
+            )
+        ):
+
+            fallback_model = (
+                self._choose_fallback_model(
+                    primary_model,
+                    installed_models
                 )
-            },
-            provider_name="ollama"
+            )
+
+            if fallback_model:
+
+                fallback_route = (
+                    self.router.choose(
+                        prompt,
+                        installed_models,
+                        requested_model=(
+                            fallback_model
+                        )
+                    )
+                )
+
+                if fallback_route.get(
+                    "success"
+                ):
+
+                    fallback_used = True
+
+                    result = self._generate(
+                        fallback_route
+                    )
+
+                    attempts.append(
+                        {
+                            "model": (
+                                fallback_model
+                            ),
+                            "attempt": 1,
+                            "success": result.get(
+                                "success",
+                                False
+                            ),
+                            "error": result.get(
+                                "error"
+                            ),
+                            "fallback": True
+                        }
+                    )
+
+                    if result.get(
+                        "success"
+                    ):
+
+                        route = fallback_route
+
+        # ---------------------------------
+        # FINAL RESULT
+        # ---------------------------------
+
+        if result is None:
+
+            result = {
+                "success": False,
+                "provider": "ollama",
+                "error": (
+                    "No Ollama generation "
+                    "attempt was completed."
+                )
+            }
+
+        result["attempts"] = attempts
+        result["attempt_count"] = len(
+            attempts
+        )
+        result["primary_model"] = (
+            primary_model
+        )
+        result["fallback_used"] = (
+            fallback_used
+        )
+        result["fallback_model"] = (
+            fallback_model
+        )
+        result["failure_type"] = (
+            self.resilience.classify(
+                result
+            )
         )
 
         self.last_execution_result = (
             result
         )
+
+        # ---------------------------------
+        # FAILURE
+        # ---------------------------------
 
         if not result.get(
             "success"
@@ -420,8 +523,14 @@ class ProviderSkill:
 
             return (
                 "Aether: Ollama generation failed.\n"
-                f"{result.get('error', '')}"
+                f"{result.get('error', '')}\n\n"
+                f"Attempts: "
+                f"{result['attempt_count']}"
             ).rstrip()
+
+        # ---------------------------------
+        # SUCCESS
+        # ---------------------------------
 
         response = result.get(
             "response",
@@ -435,12 +544,79 @@ class ProviderSkill:
                 "an empty response."
             )
 
-        return (
+        output = (
             "Aether: Local AI response\n"
             f"Model: {route['model']}\n"
-            f"Tier: {route['tier']}\n\n"
-            f"{response}"
+            f"Tier: {route['tier']}\n"
+            f"Attempts: "
+            f"{result['attempt_count']}"
         )
+
+        if fallback_used:
+
+            output += (
+                "\nFallback: "
+                f"{fallback_model}"
+            )
+
+        output += (
+            "\n\n"
+            + response
+        )
+
+        return output
+
+    # ---------------------------------
+    # GENERATE
+    # ---------------------------------
+
+    def _generate(
+        self,
+        route
+    ):
+
+        return self.manager.execute(
+            "generate_text",
+            {
+                "model": route["model"],
+                "prompt": route["prompt"],
+                "think": route["think"],
+                "num_ctx": route["num_ctx"],
+                "num_predict": (
+                    route["num_predict"]
+                ),
+                "keep_alive": (
+                    route["keep_alive"]
+                )
+            },
+            provider_name="ollama"
+        )
+
+    # ---------------------------------
+    # FALLBACK MODEL
+    # ---------------------------------
+
+    def _choose_fallback_model(
+        self,
+        primary_model,
+        installed_models
+    ):
+
+        candidates = [
+            "gemma3:1b",
+            "qwen3:4b"
+        ]
+
+        for model in candidates:
+
+            if (
+                model in installed_models
+                and model != primary_model
+            ):
+
+                return model
+
+        return None
 
     # ---------------------------------
     # EXECUTE
