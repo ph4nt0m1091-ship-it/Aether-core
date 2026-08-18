@@ -18,39 +18,61 @@ class Brain:
     """
     Aether's central coordinator.
 
-    Brain receives user input and routes commands
-    to the appropriate subsystem.
+    Brain receives user input and routes it to:
+
+    - existing commands
+    - direct skills
+    - projects/missions
+    - capability-gap detection
+    - dynamic Planner/Orchestrator workflows
     """
 
-    def __init__(self, memory):
+    def __init__(
+        self,
+        memory
+    ):
 
         self.memory = memory
 
-        # ----------------------------
-        # Core Systems
-        # ----------------------------
+        # ---------------------------------
+        # CORE SYSTEMS
+        # ---------------------------------
 
-        self.intent = IntentAnalyzer()
-
-        self.cortex = Cortex()
-
-        self.planner = Planner()
-
-        self.skill_manager = SkillManager(
-            memory
+        self.intent = (
+            IntentAnalyzer()
         )
 
-        self.skill_gap_storage = SkillGapStorage()
-
-        self.executor = TaskExecutor(
-            self.skill_manager
+        self.cortex = (
+            Cortex()
         )
 
-        # ----------------------------
-        # Command Router
-        # ----------------------------
+        self.planner = (
+            Planner()
+        )
 
-        self.router = CommandRouter()
+        self.skill_manager = (
+            SkillManager(
+                memory
+            )
+        )
+
+        self.skill_gap_storage = (
+            SkillGapStorage()
+        )
+
+        self.executor = (
+            TaskExecutor(
+                self.skill_manager
+            )
+        )
+
+        # ---------------------------------
+        # COMMAND ROUTER
+        # ---------------------------------
+
+        self.router = (
+            CommandRouter()
+        )
 
         self.router.register(
             ProjectCommands()
@@ -68,13 +90,18 @@ class Brain:
             MissionCommands()
         )
 
-    # ----------------------------
-    # Main Thought Cycle
-    # ----------------------------
+    # ---------------------------------
+    # MAIN THOUGHT CYCLE
+    # ---------------------------------
 
-    def think(self, message):
+    def think(
+        self,
+        message
+    ):
 
-        message = message.strip()
+        message = (
+            message.strip()
+        )
 
         if not message:
 
@@ -82,17 +109,17 @@ class Brain:
                 "Aether: I didn't catch that."
             )
 
-        # ----------------------------
-        # Analyze Intent
-        # ----------------------------
+        # ---------------------------------
+        # ANALYZE INTENT
+        # ---------------------------------
 
         intent = self.intent.analyze(
             message
         )
 
-        # ----------------------------
-        # Command Router
-        # ----------------------------
+        # ---------------------------------
+        # COMMAND ROUTER
+        # ---------------------------------
 
         response = self.router.handle(
             self,
@@ -103,18 +130,18 @@ class Brain:
 
             return response
 
-        # ----------------------------
-        # Normalize Input
-        # ----------------------------
+        # ---------------------------------
+        # NORMALIZE INPUT
+        # ---------------------------------
 
         lower = (
             message.lower()
             .rstrip("?")
         )
 
-        # ----------------------------
-        # Skill Awareness
-        # ----------------------------
+        # ---------------------------------
+        # SKILL AWARENESS
+        # ---------------------------------
 
         if lower in (
             "what skills do you know",
@@ -150,9 +177,9 @@ class Brain:
 
             return output.rstrip()
 
-        # ----------------------------
-        # Project Awareness
-        # ----------------------------
+        # ---------------------------------
+        # PROJECT AWARENESS
+        # ---------------------------------
 
         if lower in (
             "show projects",
@@ -200,9 +227,9 @@ class Brain:
 
             return output
 
-        # ----------------------------
-        # Create Project
-        # ----------------------------
+        # ---------------------------------
+        # CREATE PROJECT
+        # ---------------------------------
 
         if lower.startswith(
             "create project "
@@ -221,7 +248,9 @@ class Brain:
 
             project = (
                 self.cortex.projects
-                .create_project(name)
+                .create_project(
+                    name
+                )
             )
 
             self.cortex.projects.save()
@@ -231,9 +260,112 @@ class Brain:
                 f'"{project.name}" created.'
             )
 
-        # ----------------------------
-        # Capability Request
-        # ----------------------------
+        # ---------------------------------
+        # PLAN PREVIEW
+        # ---------------------------------
+        #
+        # "plan <goal>" lets you inspect what
+        # Aether WOULD execute without running it.
+
+        if lower.startswith(
+            "plan "
+        ):
+
+            goal = message[
+                len("plan "):
+            ].strip()
+
+            plan = (
+                self.planner
+                .create_workflow_request(
+                    goal
+                )
+            )
+
+            if not plan.get(
+                "success"
+            ):
+
+                return (
+                    "Aether: I couldn't build "
+                    "a multi-step plan for that.\n"
+                    f"{plan.get('error', '')}"
+                ).rstrip()
+
+            output = (
+                "Aether: Proposed Workflow\n\n"
+            )
+
+            for index, step in enumerate(
+                plan.get(
+                    "steps",
+                    []
+                ),
+                start=1
+            ):
+
+                output += (
+                    f"{index}. {step}\n"
+                )
+
+            output += (
+                "\nNothing has been "
+                "executed yet."
+            )
+
+            return output.rstrip()
+
+        # ---------------------------------
+        # DYNAMIC ORCHESTRATION
+        # ---------------------------------
+        #
+        # Higher-level requests are converted
+        # into canonical WorkflowSkill commands.
+        #
+        # Planner creates the plan.
+        # WorkflowEngine executes it.
+        # PermissionManager still controls
+        # sensitive terminal/system actions.
+
+        if (
+            self.planner
+            .should_orchestrate(
+                message
+            )
+        ):
+
+            plan = (
+                self.planner
+                .create_workflow_request(
+                    message
+                )
+            )
+
+            if plan.get(
+                "success"
+            ):
+
+                workflow_message = (
+                    "workflow "
+                    + plan[
+                        "workflow_request"
+                    ]
+                )
+
+                response = (
+                    self.skill_manager
+                    .handle(
+                        workflow_message
+                    )
+                )
+
+                if response is not None:
+
+                    return response
+
+        # ---------------------------------
+        # CAPABILITY REQUEST
+        # ---------------------------------
 
         if intent == "capability_request":
 
@@ -267,22 +399,24 @@ class Brain:
                 "skill gap detected."
             )
 
-        # ----------------------------
-        # Normal Skills
-        # ----------------------------
+        # ---------------------------------
+        # NORMAL SKILLS
+        # ---------------------------------
 
         response = (
             self.skill_manager
-            .handle(message)
+            .handle(
+                message
+            )
         )
 
         if response:
 
             return response
 
-        # ----------------------------
-        # Unknown Command
-        # ----------------------------
+        # ---------------------------------
+        # UNKNOWN COMMAND
+        # ---------------------------------
 
         return (
             "Aether: I'm not sure how "
