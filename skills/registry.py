@@ -6,6 +6,7 @@ from skills.file_skill import FileSkill
 from skills.web_search_skill import WebSearchSkill
 from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
+from skills.history_skill import HistorySkill
 from skills.terminal_skill import TerminalSkill
 from skills.workflow_skill import WorkflowSkill
 
@@ -37,6 +38,7 @@ class SkillRegistry:
             WebSearchSkill(memory),
             ResearchSkill(memory),
             SystemSkill(memory),
+            HistorySkill(memory),
 
             # Workflow must come before terminal
             # so paused workflows can resume.
