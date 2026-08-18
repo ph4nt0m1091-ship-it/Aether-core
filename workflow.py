@@ -1,3 +1,6 @@
+import json
+import re
+
 from datetime import datetime
 from uuid import uuid4
 
@@ -8,7 +11,18 @@ class Workflow:
 
     Workflows are separate from predefined missions.
     They are intended for dynamic, user-requested work.
+
+    Workflow results can be referenced by later steps:
+
+    {{previous}}
+    {{step.1}}
+    {{step.2}}
     """
+
+    REFERENCE_PATTERN = re.compile(
+        r"\{\{\s*(previous|step\.(\d+))\s*\}\}",
+        re.IGNORECASE
+    )
 
     def __init__(
         self,
@@ -121,7 +135,7 @@ class Workflow:
         """
         Move back one step.
 
-        This is used when a workflow pauses before
+        Used when a workflow pauses before
         an action actually executes.
         """
 
@@ -167,6 +181,203 @@ class Workflow:
         self.status = "pending"
 
         self.touch()
+
+    # ---------------------------------
+    # RESULT ACCESS
+    # ---------------------------------
+
+    def previous_result(
+        self
+    ):
+
+        if not self.results:
+
+            raise ValueError(
+                "There is no previous workflow result."
+            )
+
+        return self.results[-1]
+
+    def step_result(
+        self,
+        step_number
+    ):
+
+        try:
+
+            step_number = int(
+                step_number
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            raise ValueError(
+                "Workflow step reference is invalid."
+            )
+
+        index = (
+            step_number - 1
+        )
+
+        if (
+            index < 0
+            or index >= len(self.results)
+        ):
+
+            raise ValueError(
+                f"Workflow step {step_number} "
+                "does not have a result yet."
+            )
+
+        return self.results[
+            index
+        ]
+
+    # ---------------------------------
+    # RESULT → TEXT
+    # ---------------------------------
+
+    def result_text(
+        self,
+        result
+    ):
+
+        if result is None:
+
+            return ""
+
+        if isinstance(
+            result,
+            str
+        ):
+
+            return result
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return str(
+                result
+            )
+
+        # Prefer clean machine-readable output
+        # over Aether's formatted display text.
+        for key in (
+            "output",
+            "content",
+            "answer",
+            "stdout",
+            "response"
+        ):
+
+            value = result.get(
+                key
+            )
+
+            if value is not None:
+
+                if isinstance(
+                    value,
+                    str
+                ):
+
+                    return value
+
+                return json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str
+                )
+
+        return json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2,
+            default=str
+        )
+
+    # ---------------------------------
+    # REFERENCE RESOLUTION
+    # ---------------------------------
+
+    def resolve_references(
+        self,
+        value
+    ):
+
+        if isinstance(
+            value,
+            dict
+        ):
+
+            return {
+                key: self.resolve_references(
+                    item
+                )
+                for key, item
+                in value.items()
+            }
+
+        if isinstance(
+            value,
+            list
+        ):
+
+            return [
+                self.resolve_references(
+                    item
+                )
+                for item in value
+            ]
+
+        if not isinstance(
+            value,
+            str
+        ):
+
+            return value
+
+        def replace_reference(
+            match
+        ):
+
+            reference = (
+                match.group(1)
+                .lower()
+            )
+
+            if reference == "previous":
+
+                result = (
+                    self.previous_result()
+                )
+
+                return self.result_text(
+                    result
+                )
+
+            step_number = (
+                match.group(2)
+            )
+
+            result = self.step_result(
+                step_number
+            )
+
+            return self.result_text(
+                result
+            )
+
+        return self.REFERENCE_PATTERN.sub(
+            replace_reference,
+            value
+        )
 
     # ---------------------------------
     # PERSISTENCE

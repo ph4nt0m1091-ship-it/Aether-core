@@ -14,6 +14,8 @@ class WorkflowEngine:
     Supports:
     - Aether skills
     - capability providers
+    - workflow result references
+    - direct structured skill execution
     - external AI provider failure propagation
     - permission-aware terminal pauses
     - persistent workflow state
@@ -62,10 +64,6 @@ class WorkflowEngine:
 
             step = workflow.next_step()
 
-            # ---------------------------------
-            # RECORD START
-            # ---------------------------------
-
             self.ledger.record(
                 workflow.workflow_id,
                 step,
@@ -73,6 +71,7 @@ class WorkflowEngine:
             )
 
             result = self._execute_step(
+                workflow,
                 step
             )
 
@@ -188,6 +187,7 @@ class WorkflowEngine:
 
     def _execute_step(
         self,
+        workflow,
         step
     ):
 
@@ -200,7 +200,7 @@ class WorkflowEngine:
             ""
         )
 
-        data = step.get(
+        raw_data = step.get(
             "data",
             {}
         )
@@ -210,10 +210,122 @@ class WorkflowEngine:
         )
 
         # ---------------------------------
+        # RESOLVE WORKFLOW REFERENCES
+        # ---------------------------------
+
+        try:
+
+            data = workflow.resolve_references(
+                raw_data
+            )
+
+            target = workflow.resolve_references(
+                target
+            )
+
+        except ValueError as error:
+
+            return {
+                "success": False,
+                "paused": False,
+                "type": step_type,
+                "action": action,
+                "error": str(
+                    error
+                )
+            }
+
+        # ---------------------------------
         # SKILL
         # ---------------------------------
 
         if step_type == "skill":
+
+            # ---------------------------------
+            # DIRECT STRUCTURED SKILL
+            # ---------------------------------
+            #
+            # A skill step without a "message"
+            # is executed through the skill's
+            # structured execute() interface.
+
+            if "message" not in data:
+
+                skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        action
+                    )
+                )
+
+                if skill is None:
+
+                    return {
+                        "success": False,
+                        "paused": False,
+                        "type": "skill",
+                        "action": action,
+                        "error": (
+                            f'Skill "{action}" '
+                            "was not found."
+                        )
+                    }
+
+                operation = data.get(
+                    "operation",
+                    ""
+                )
+
+                skill_result = skill.execute(
+                    {
+                        "action": operation,
+                        "data": data
+                    }
+                )
+
+                if skill_result is None:
+
+                    return {
+                        "success": False,
+                        "paused": False,
+                        "type": "skill",
+                        "action": action,
+                        "error": (
+                            f'Skill "{action}" returned '
+                            "no execution result."
+                        )
+                    }
+
+                if not isinstance(
+                    skill_result,
+                    dict
+                ):
+
+                    skill_result = {
+                        "success": True,
+                        "response": str(
+                            skill_result
+                        )
+                    }
+
+                skill_result["type"] = (
+                    "skill"
+                )
+
+                skill_result["action"] = (
+                    action
+                )
+
+                skill_result["paused"] = (
+                    False
+                )
+
+                return skill_result
+
+            # ---------------------------------
+            # CONVERSATIONAL SKILL
+            # ---------------------------------
 
             message = data.get(
                 "message",
@@ -272,17 +384,6 @@ class WorkflowEngine:
             # ---------------------------------
             # PROVIDER SKILL RESULT
             # ---------------------------------
-            #
-            # ProviderSkill returns human-readable
-            # text to the conversation, but also
-            # preserves the actual structured
-            # provider result.
-            #
-            # This prevents errors such as:
-            #
-            # "Ollama generation failed"
-            # being recorded as a successful
-            # workflow step.
 
             if action == "providers":
 
@@ -302,29 +403,52 @@ class WorkflowEngine:
                         None
                     )
 
-                    if (
-                        provider_result is not None
-                        and not provider_result.get(
+                    if provider_result is not None:
+
+                        if not provider_result.get(
                             "success",
                             False
-                        )
-                    ):
+                        ):
+
+                            return {
+                                "success": False,
+                                "paused": False,
+                                "type": "skill",
+                                "action": action,
+                                "response": response,
+                                "provider": (
+                                    provider_result.get(
+                                        "provider"
+                                    )
+                                ),
+                                "error": (
+                                    provider_result.get(
+                                        "error",
+                                        response
+                                    )
+                                )
+                            }
 
                         return {
-                            "success": False,
+                            "success": True,
                             "paused": False,
                             "type": "skill",
                             "action": action,
                             "response": response,
+                            "output": (
+                                provider_result.get(
+                                    "response",
+                                    response
+                                )
+                            ),
                             "provider": (
                                 provider_result.get(
                                     "provider"
                                 )
                             ),
-                            "error": (
+                            "model": (
                                 provider_result.get(
-                                    "error",
-                                    response
+                                    "model"
                                 )
                             )
                         }
@@ -352,9 +476,7 @@ class WorkflowEngine:
             )
 
             result["type"] = "provider"
-
             result["action"] = action
-
             result["paused"] = False
 
             return result

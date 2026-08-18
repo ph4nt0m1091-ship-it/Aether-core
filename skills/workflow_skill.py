@@ -1,3 +1,5 @@
+import re
+
 from workflow import Workflow
 from workflow_engine import WorkflowEngine
 
@@ -9,6 +11,9 @@ class WorkflowSkill:
     Workflows can:
     - Execute multiple skills/providers
     - Use external AI providers through Aether skills
+    - Pass results between workflow steps
+    - Reference previous or specific step results
+    - Save workflow results to files
     - Pause for terminal permission
     - Resume after approval
     - Survive Aether restarts
@@ -21,8 +26,8 @@ class WorkflowSkill:
 
     description = (
         "Coordinates persistent multi-step Aether workflows "
-        "that can use external providers, pause, resume, "
-        "and recover after restarts."
+        "that can pass data between steps, use external "
+        "providers, pause, resume, and recover after restarts."
     )
 
     def __init__(
@@ -597,6 +602,53 @@ class WorkflowSkill:
         )
 
     # ---------------------------------
+    # NORMALIZE RESULT REFERENCES
+    # ---------------------------------
+
+    def _normalize_references(
+        self,
+        text
+    ):
+
+        text = re.sub(
+            r"\bthe previous result\b",
+            "{{previous}}",
+            text,
+            flags=re.IGNORECASE
+        )
+
+        text = re.sub(
+            r"\bprevious result\b",
+            "{{previous}}",
+            text,
+            flags=re.IGNORECASE
+        )
+
+        text = re.sub(
+            r"\bresult from step\s+(\d+)\b",
+            lambda match: (
+                "{{step."
+                + match.group(1)
+                + "}}"
+            ),
+            text,
+            flags=re.IGNORECASE
+        )
+
+        text = re.sub(
+            r"\bstep\s+(\d+)\s+result\b",
+            lambda match: (
+                "{{step."
+                + match.group(1)
+                + "}}"
+            ),
+            text,
+            flags=re.IGNORECASE
+        )
+
+        return text
+
+    # ---------------------------------
     # BUILD WORKFLOW
     # ---------------------------------
 
@@ -620,7 +672,47 @@ class WorkflowSkill:
 
         for part in parts:
 
+            part = self._normalize_references(
+                part
+            )
+
             lower = part.lower()
+
+            # -------------------------
+            # SAVE WORKFLOW RESULT
+            # -------------------------
+
+            save_match = re.match(
+                r"^save\s+"
+                r"(\{\{previous\}\}|\{\{step\.\d+\}\})"
+                r"\s+to\s+(.+)$",
+                part,
+                re.IGNORECASE
+            )
+
+            if save_match:
+
+                content_reference = (
+                    save_match.group(1)
+                )
+
+                filename = (
+                    save_match.group(2)
+                    .strip()
+                    .strip('"')
+                )
+
+                workflow.add_step(
+                    "skill",
+                    "file",
+                    {
+                        "operation": "write_text",
+                        "filename": filename,
+                        "content": content_reference
+                    }
+                )
+
+                continue
 
             # -------------------------
             # TERMINAL
