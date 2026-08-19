@@ -9,6 +9,7 @@ from skills.system_skill import SystemSkill
 from skills.history_skill import HistorySkill
 from skills.provider_skill import ProviderSkill
 from skills.scheduler_skill import SchedulerSkill
+from skills.runtime_skill import RuntimeSkill
 from skills.terminal_skill import TerminalSkill
 from skills.workflow_skill import WorkflowSkill
 
@@ -35,6 +36,12 @@ class SkillRegistry:
             )
         )
 
+        self.runtime_skill = (
+            RuntimeSkill(
+                memory
+            )
+        )
+
         self.terminal_skill = (
             TerminalSkill(
                 memory
@@ -52,7 +59,9 @@ class SkillRegistry:
             SystemSkill(memory),
             HistorySkill(memory),
             ProviderSkill(memory),
+
             self.scheduler_skill,
+            self.runtime_skill,
 
             # Workflow must come before terminal
             # so paused workflows can resume.
@@ -77,8 +86,12 @@ class SkillRegistry:
             skill_manager
         )
 
+        self.runtime_skill.connect(
+            skill_manager
+        )
+
     # ---------------------------------
-    # SCHEDULER LIFECYCLE
+    # BACKGROUND SERVICES
     # ---------------------------------
 
     def start_background_services(
