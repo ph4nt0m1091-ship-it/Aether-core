@@ -5,6 +5,11 @@ import time
 
 from pathlib import Path
 
+from runtime_state import (
+    remove_heartbeat,
+    set_desired_state
+)
+
 
 BASE_DIR = Path(
     __file__
@@ -145,6 +150,8 @@ def cleanup_stale_pid():
 
             pass
 
+        remove_heartbeat()
+
         return None
 
     return pid
@@ -187,6 +194,10 @@ def status():
 # ---------------------------------
 
 def start():
+
+    set_desired_state(
+        "running"
+    )
 
     existing_pid = (
         cleanup_stale_pid()
@@ -274,9 +285,6 @@ def start():
 
         return 1
 
-    # Give background_runtime.py time
-    # to create its PID file.
-
     for _ in range(
         20
     ):
@@ -318,9 +326,15 @@ def start():
 
 def stop():
 
+    set_desired_state(
+        "stopped"
+    )
+
     pid = cleanup_stale_pid()
 
     if pid is None:
+
+        remove_heartbeat()
 
         print(
             "Aether background runtime "
@@ -362,9 +376,6 @@ def stop():
 
         return 1
 
-    # Give Windows time to remove
-    # the terminated process.
-
     for _ in range(
         20
     ):
@@ -386,6 +397,8 @@ def stop():
             except OSError:
 
                 pass
+
+            remove_heartbeat()
 
             print(
                 "Aether background runtime stopped."

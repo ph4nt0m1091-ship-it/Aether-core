@@ -18,3 +18,8 @@ storage/scheduled_jobs.json
 storage/scheduler_runtime.lock
 storage/background_runtime.log
 storage/background_runtime.pid
+storage/runtime_state.json
+storage/background_heartbeat.json
+storage/supervisor.log
+storage/supervisor.pid
+storage/supervisor_runtime.lock

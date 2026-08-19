@@ -9,6 +9,11 @@ from pathlib import Path
 from memory import Memory
 from brain import Brain
 
+from runtime_state import (
+    remove_heartbeat,
+    write_heartbeat
+)
+
 
 BASE_DIR = Path(
     __file__
@@ -29,6 +34,12 @@ PID_PATH = (
     / "background_runtime.pid"
 )
 
+HEALTH_INTERVAL = 2.0
+
+
+# ---------------------------------
+# PID
+# ---------------------------------
 
 def write_pid():
 
@@ -58,6 +69,87 @@ def remove_pid():
         pass
 
 
+# ---------------------------------
+# SCHEDULER HEALTH
+# ---------------------------------
+
+def scheduler_alive(
+    brain
+):
+
+    scheduler_skill = (
+        brain.skill_manager
+        .registry
+        .scheduler_skill
+    )
+
+    engine = (
+        scheduler_skill.engine
+    )
+
+    if engine is None:
+
+        return False
+
+    thread = getattr(
+        engine,
+        "_thread",
+        None
+    )
+
+    return bool(
+        thread is not None
+        and thread.is_alive()
+        and engine.is_owner
+    )
+
+
+def repair_scheduler(
+    brain
+):
+
+    if scheduler_alive(
+        brain
+    ):
+
+        return True
+
+    print(
+        "Aether Background Runtime: "
+        "scheduler health check failed."
+    )
+
+    scheduler_skill = (
+        brain.skill_manager
+        .registry
+        .scheduler_skill
+    )
+
+    started = (
+        scheduler_skill.start()
+    )
+
+    if started:
+
+        print(
+            "Aether Background Runtime: "
+            "scheduler recovered."
+        )
+
+        return True
+
+    print(
+        "Aether Background Runtime: "
+        "scheduler recovery failed."
+    )
+
+    return False
+
+
+# ---------------------------------
+# RUNTIME
+# ---------------------------------
+
 def runtime():
 
     os.chdir(
@@ -70,11 +162,14 @@ def runtime():
         memory
     )
 
-    started = (
+    scheduler_skill = (
         brain.skill_manager
         .registry
         .scheduler_skill
-        .start()
+    )
+
+    started = (
+        scheduler_skill.start()
     )
 
     if not started:
@@ -88,6 +183,11 @@ def runtime():
         return 0
 
     write_pid()
+
+    write_heartbeat(
+        os.getpid(),
+        scheduler_alive=True
+    )
 
     print(
         "=" * 50
@@ -119,8 +219,19 @@ def runtime():
 
         while True:
 
+            healthy = (
+                repair_scheduler(
+                    brain
+                )
+            )
+
+            write_heartbeat(
+                os.getpid(),
+                scheduler_alive=healthy
+            )
+
             time.sleep(
-                1
+                HEALTH_INTERVAL
             )
 
     except KeyboardInterrupt:
@@ -134,10 +245,16 @@ def runtime():
 
         brain.skill_manager.stop_background_services()
 
+        remove_heartbeat()
+
         remove_pid()
 
     return 0
 
+
+# ---------------------------------
+# MAIN
+# ---------------------------------
 
 def main():
 
@@ -174,6 +291,8 @@ def main():
                         error
                     )
                 )
+
+                remove_heartbeat()
 
                 remove_pid()
 
