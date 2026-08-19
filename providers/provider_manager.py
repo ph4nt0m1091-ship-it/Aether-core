@@ -3,7 +3,9 @@ class ProviderManager:
     Registry and router for Aether capability providers.
     """
 
-    def __init__(self):
+    def __init__(
+        self
+    ):
 
         self.providers = {}
 
@@ -11,7 +13,10 @@ class ProviderManager:
     # REGISTER
     # ---------------------------------
 
-    def register(self, provider):
+    def register(
+        self,
+        provider
+    ):
 
         if provider is None:
 
@@ -27,47 +32,130 @@ class ProviderManager:
 
             return False
 
-        self.providers[name] = provider
+        self.providers[
+            name
+        ] = provider
 
         return True
+
+    # ---------------------------------
+    # REGISTER MANY
+    # ---------------------------------
+
+    def register_many(
+        self,
+        providers
+    ):
+
+        registered = []
+
+        for provider in (
+            providers or []
+        ):
+
+            if self.register(
+                provider
+            ):
+
+                registered.append(
+                    provider.name
+                )
+
+        return registered
 
     # ---------------------------------
     # GET PROVIDER
     # ---------------------------------
 
-    def get(self, name):
+    def get(
+        self,
+        name
+    ):
 
         return self.providers.get(
             name
         )
 
     # ---------------------------------
-    # AVAILABLE PROVIDERS
+    # PROVIDER INFO
     # ---------------------------------
 
-    def available_providers(self):
+    def provider_info(
+        self
+    ):
 
         return [
             provider.info()
-            for provider in self.providers.values()
+            for provider in (
+                self.providers.values()
+            )
+        ]
+
+    # ---------------------------------
+    # AVAILABLE PROVIDERS
+    # ---------------------------------
+
+    def available_providers(
+        self
+    ):
+
+        return [
+            provider.info()
+            for provider in (
+                self.providers.values()
+            )
             if provider.available()
         ]
+
+    # ---------------------------------
+    # EXTERNAL AGENTS
+    # ---------------------------------
+
+    def external_agents(
+        self
+    ):
+
+        agents = []
+
+        for provider in (
+            self.providers.values()
+        ):
+
+            if getattr(
+                provider,
+                "provider_type",
+                ""
+            ) != "external_agent":
+
+                continue
+
+            agents.append(
+                provider.info()
+            )
+
+        return agents
 
     # ---------------------------------
     # ALL CAPABILITIES
     # ---------------------------------
 
-    def capabilities(self):
+    def capabilities(
+        self
+    ):
 
         capabilities = {}
 
-        for name, provider in self.providers.items():
+        for name, provider in (
+            self.providers.items()
+        ):
 
             if not provider.available():
 
                 continue
 
-            for capability in provider.capabilities():
+            for capability in (
+                provider.capabilities()
+            ):
 
                 capabilities.setdefault(
                     capability,
@@ -79,22 +167,54 @@ class ProviderManager:
         return capabilities
 
     # ---------------------------------
-    # FIND PROVIDER
+    # FIND PROVIDERS
     # ---------------------------------
 
-    def find_provider(self, capability):
+    def find_providers(
+        self,
+        capability
+    ):
 
-        for provider in self.providers.values():
+        matches = []
+
+        for provider in (
+            self.providers.values()
+        ):
 
             if not provider.available():
 
                 continue
 
-            if capability in provider.capabilities():
+            if capability in (
+                provider.capabilities()
+            ):
 
-                return provider
+                matches.append(
+                    provider
+                )
 
-        return None
+        return matches
+
+    # ---------------------------------
+    # FIND PROVIDER
+    # ---------------------------------
+
+    def find_provider(
+        self,
+        capability
+    ):
+
+        matches = (
+            self.find_providers(
+                capability
+            )
+        )
+
+        if not matches:
+
+            return None
+
+        return matches[0]
 
     # ---------------------------------
     # EXECUTE
@@ -127,6 +247,9 @@ class ProviderManager:
 
                 return {
                     "success": False,
+                    "provider": (
+                        provider_name
+                    ),
                     "error": (
                         f'Provider "{provider_name}" '
                         "is not available."
@@ -135,8 +258,10 @@ class ProviderManager:
 
         else:
 
-            provider = self.find_provider(
-                capability
+            provider = (
+                self.find_provider(
+                    capability
+                )
             )
 
         if provider is None:
@@ -149,17 +274,69 @@ class ProviderManager:
                 )
             }
 
-        if capability not in provider.capabilities():
+        if capability not in (
+            provider.capabilities()
+        ):
 
             return {
                 "success": False,
+                "provider": (
+                    provider.name
+                ),
                 "error": (
-                    f'Provider "{provider.name}" does not '
-                    f'support "{capability}".'
+                    f'Provider "{provider.name}" '
+                    f'does not support '
+                    f'"{capability}".'
                 )
             }
 
-        return provider.execute(
+        result = provider.execute(
             capability,
             task
         )
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            result = {
+                "success": False,
+                "provider": (
+                    provider.name
+                ),
+                "error": (
+                    "Provider returned an "
+                    "invalid result."
+                )
+            }
+
+        result.setdefault(
+            "provider",
+            provider.name
+        )
+
+        result.setdefault(
+            "provider_type",
+            getattr(
+                provider,
+                "provider_type",
+                "generic"
+            )
+        )
+
+        result.setdefault(
+            "capability",
+            capability
+        )
+
+        result.setdefault(
+            "requires_permission",
+            getattr(
+                provider,
+                "requires_permission",
+                False
+            )
+        )
+
+        return result

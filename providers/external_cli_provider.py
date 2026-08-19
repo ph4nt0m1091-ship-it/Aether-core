@@ -1,37 +1,52 @@
+import os
 import shutil
 import subprocess
+
+from pathlib import Path
 
 from providers.base_provider import BaseProvider
 
 
 class ExternalCLIProvider(BaseProvider):
     """
-    Generic adapter for external command-line tools.
+    Generic adapter for external command-line agents.
 
-    This provider can wrap installed CLIs and expose
-    them to Aether through the standard provider API.
+    Safety properties:
+    - shell=False
+    - fixed executable
+    - structured arguments
+    - explicit timeout
+    - optional working directory
+    - permission metadata
+    - captures stdout/stderr
     """
 
-    name = "external_cli"
+    provider_type = "external_agent"
 
-    description = (
-        "Generic adapter for external command-line tools."
-    )
+    requires_permission = True
+
+    DEFAULT_TIMEOUT = 300
 
     def __init__(
         self,
         provider_name,
         executable,
         capabilities=None,
-        description=None
+        description=None,
+        default_args=None,
+        working_directory=None
     ):
 
-        self.name = provider_name
+        self.name = str(
+            provider_name
+        ).strip()
 
-        self.executable = executable
+        self.executable = str(
+            executable
+        ).strip()
 
         self._capabilities = (
-            capabilities
+            list(capabilities)
             if isinstance(
                 capabilities,
                 list
@@ -39,11 +54,42 @@ class ExternalCLIProvider(BaseProvider):
             else []
         )
 
+        self.default_args = (
+            list(default_args)
+            if isinstance(
+                default_args,
+                list
+            )
+            else []
+        )
+
+        self.working_directory = (
+            str(working_directory)
+            if working_directory
+            else None
+        )
+
         if description:
 
-            self.description = (
+            self.description = str(
                 description
             )
+
+        else:
+
+            self.description = (
+                "External command-line agent."
+            )
+
+    # ---------------------------------
+    # RESOLVE EXECUTABLE
+    # ---------------------------------
+
+    def executable_path(self):
+
+        return shutil.which(
+            self.executable
+        )
 
     # ---------------------------------
     # AVAILABLE
@@ -52,9 +98,7 @@ class ExternalCLIProvider(BaseProvider):
     def available(self):
 
         return (
-            shutil.which(
-                self.executable
-            )
+            self.executable_path()
             is not None
         )
 
@@ -67,6 +111,73 @@ class ExternalCLIProvider(BaseProvider):
         return list(
             self._capabilities
         )
+
+    # ---------------------------------
+    # INFO
+    # ---------------------------------
+
+    def info(self):
+
+        data = super().info()
+
+        data.update(
+            {
+                "executable": (
+                    self.executable
+                ),
+                "executable_path": (
+                    self.executable_path()
+                ),
+                "working_directory": (
+                    self.working_directory
+                )
+            }
+        )
+
+        return data
+
+    # ---------------------------------
+    # PREVIEW COMMAND
+    # ---------------------------------
+
+    def preview_command(
+        self,
+        task
+    ):
+
+        args = list(
+            self.default_args
+        )
+
+        if isinstance(
+            task,
+            dict
+        ):
+
+            task_args = task.get(
+                "args",
+                []
+            )
+
+            if isinstance(
+                task_args,
+                list
+            ):
+
+                args.extend(
+                    str(item)
+                    for item in task_args
+                )
+
+        elif task is not None:
+
+            args.append(
+                str(task)
+            )
+
+        return [
+            self.executable
+        ] + args
 
     # ---------------------------------
     # EXECUTE
@@ -83,17 +194,27 @@ class ExternalCLIProvider(BaseProvider):
             return {
                 "success": False,
                 "provider": self.name,
+                "provider_type": (
+                    self.provider_type
+                ),
                 "error": (
                     f'Capability "{capability}" '
                     "is not supported."
                 )
             }
 
-        if not self.available():
+        executable_path = (
+            self.executable_path()
+        )
+
+        if executable_path is None:
 
             return {
                 "success": False,
                 "provider": self.name,
+                "provider_type": (
+                    self.provider_type
+                ),
                 "error": (
                     f'Executable "{self.executable}" '
                     "is not available."
@@ -105,28 +226,37 @@ class ExternalCLIProvider(BaseProvider):
             dict
         ):
 
-            args = task.get(
+            task_args = task.get(
                 "args",
                 []
             )
 
             timeout = task.get(
                 "timeout",
-                120
+                self.DEFAULT_TIMEOUT
+            )
+
+            cwd = task.get(
+                "cwd",
+                self.working_directory
             )
 
         else:
 
-            args = [
-                str(
-                    task
-                )
+            task_args = [
+                str(task)
             ]
 
-            timeout = 120
+            timeout = (
+                self.DEFAULT_TIMEOUT
+            )
+
+            cwd = (
+                self.working_directory
+            )
 
         if not isinstance(
-            args,
+            task_args,
             list
         ):
 
@@ -139,23 +269,37 @@ class ExternalCLIProvider(BaseProvider):
                 )
             }
 
-        command = [
-            self.executable
-        ]
-
-        command.extend(
-            str(item)
-            for item in args
+        args = list(
+            self.default_args
         )
+
+        args.extend(
+            str(item)
+            for item in task_args
+        )
+
+        command = [
+            executable_path
+        ] + args
+
+        creation_flags = 0
+
+        if os.name == "nt":
+
+            creation_flags = (
+                subprocess.CREATE_NO_WINDOW
+            )
 
         try:
 
             result = subprocess.run(
                 command,
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                shell=False
+                shell=False,
+                creationflags=creation_flags
             )
 
         except subprocess.TimeoutExpired:
@@ -163,6 +307,11 @@ class ExternalCLIProvider(BaseProvider):
             return {
                 "success": False,
                 "provider": self.name,
+                "provider_type": (
+                    self.provider_type
+                ),
+                "capability": capability,
+                "command": command,
                 "error": (
                     f"{self.name} timed out."
                 )
@@ -177,10 +326,25 @@ class ExternalCLIProvider(BaseProvider):
             return {
                 "success": False,
                 "provider": self.name,
+                "provider_type": (
+                    self.provider_type
+                ),
+                "capability": capability,
+                "command": command,
                 "error": str(
                     error
                 )
             }
+
+        stdout = (
+            result.stdout
+            .strip()
+        )
+
+        stderr = (
+            result.stderr
+            .strip()
+        )
 
         return {
             "success": (
@@ -188,16 +352,19 @@ class ExternalCLIProvider(BaseProvider):
                 == 0
             ),
             "provider": self.name,
+            "provider_type": (
+                self.provider_type
+            ),
             "capability": capability,
+            "command": command,
+            "cwd": cwd,
             "returncode": (
                 result.returncode
             ),
-            "stdout": (
-                result.stdout
-                .strip()
-            ),
-            "stderr": (
-                result.stderr
-                .strip()
+            "stdout": stdout,
+            "stderr": stderr,
+            "response": stdout,
+            "requires_permission": (
+                self.requires_permission
             )
         }
