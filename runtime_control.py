@@ -79,6 +79,14 @@ def process_exists(
 
         return False
 
+    creation_flags = 0
+
+    if os.name == "nt":
+
+        creation_flags = (
+            subprocess.CREATE_NO_WINDOW
+        )
+
     try:
 
         result = subprocess.run(
@@ -92,7 +100,8 @@ def process_exists(
             ],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            creationflags=creation_flags
         )
 
     except (
@@ -343,6 +352,14 @@ def stop():
 
         return 0
 
+    creation_flags = 0
+
+    if os.name == "nt":
+
+        creation_flags = (
+            subprocess.CREATE_NO_WINDOW
+        )
+
     try:
 
         result = subprocess.run(
@@ -357,7 +374,8 @@ def stop():
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            creationflags=creation_flags
         )
 
     except (

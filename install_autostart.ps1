@@ -4,9 +4,9 @@ $ProjectPath = "C:\Users\juju and bobby\Documents\Aether\Aether-Core"
 
 $PythonwPath = "C:\Users\juju and bobby\AppData\Local\Programs\Python\Python311\pythonw.exe"
 
-$RuntimeControl = Join-Path `
+$SupervisorPath = Join-Path `
     $ProjectPath `
-    "runtime_control.py"
+    "supervisor.py"
 
 $StartupFolder = (
     [Environment]::GetFolderPath(
@@ -33,14 +33,14 @@ if (-not (Test-Path $PythonwPath)) {
 
 
 # ---------------------------------
-# VERIFY RUNTIME CONTROL
+# VERIFY SUPERVISOR
 # ---------------------------------
 
-if (-not (Test-Path $RuntimeControl)) {
+if (-not (Test-Path $SupervisorPath)) {
 
     throw (
-        "runtime_control.py not found: " +
-        $RuntimeControl
+        "supervisor.py not found: " +
+        $SupervisorPath
     )
 }
 
@@ -65,7 +65,7 @@ if (-not (Test-Path $StartupFolder)) {
 $Launcher = @"
 @echo off
 cd /d "$ProjectPath"
-"$PythonwPath" "$RuntimeControl" start
+start "" /b "$PythonwPath" "$SupervisorPath"
 "@
 
 
@@ -90,6 +90,6 @@ Write-Host "Startup launcher:"
 Write-Host $LauncherPath
 Write-Host ""
 Write-Host (
-    "Aether will start its background " +
-    "runtime when you sign in to Windows."
+    "Aether Supervisor will start when " +
+    "you sign in to Windows."
 )
