@@ -1,32 +1,53 @@
+import shlex
+
 from model_router import ModelRouter
 from resilience import ResiliencePolicy
 
-from providers.aether_provider import AetherProvider
-from providers.local_system_provider import LocalSystemProvider
-from providers.ollama_provider import OllamaProvider
-from providers.provider_manager import ProviderManager
+from permissions.permission_manager import (
+    PermissionManager
+)
+
+from providers.aether_provider import (
+    AetherProvider
+)
+
+from providers.external_agent_registry import (
+    ExternalAgentRegistry
+)
+
+from providers.local_system_provider import (
+    LocalSystemProvider
+)
+
+from providers.ollama_provider import (
+    OllamaProvider
+)
+
+from providers.provider_manager import (
+    ProviderManager
+)
 
 
 class ProviderSkill:
     """
-    Gives Aether visibility into its provider ecosystem.
+    Manages Aether's provider ecosystem.
 
-    Current abilities:
-    - Show available providers
-    - Show provider capabilities
-    - Show installed Ollama models
-    - Automatically route local AI requests
-    - Explicitly select Ollama models
-    - Retry temporary AI failures safely
-    - Fall back to another local model when appropriate
+    Supports:
+    - Native providers
+    - Local-system providers
+    - Ollama models
+    - External-agent discovery
+    - External-agent inspection
+    - External-agent command previews
+    - Permission-gated external-agent execution
+    - Resilient Ollama retries and fallback
     """
 
     name = "providers"
 
     description = (
         "Manages Aether's native, local-system, "
-        "and external AI providers with resilient "
-        "local-model execution."
+        "local-AI, and external-agent providers."
     )
 
     MAX_PRIMARY_ATTEMPTS = 2
@@ -38,13 +59,33 @@ class ProviderSkill:
 
         self.memory = memory
 
-        self.manager = ProviderManager()
+        self.manager = (
+            ProviderManager()
+        )
 
-        self.router = ModelRouter()
+        self.router = (
+            ModelRouter()
+        )
 
-        self.resilience = ResiliencePolicy()
+        self.resilience = (
+            ResiliencePolicy()
+        )
+
+        self.permissions = (
+            PermissionManager()
+        )
+
+        self.external_registry = (
+            ExternalAgentRegistry(
+                "."
+            )
+        )
 
         self.last_execution_result = None
+
+        # ---------------------------------
+        # CORE PROVIDERS
+        # ---------------------------------
 
         self.manager.register(
             AetherProvider()
@@ -56,6 +97,19 @@ class ProviderSkill:
 
         self.manager.register(
             OllamaProvider()
+        )
+
+        # ---------------------------------
+        # DISCOVER EXTERNAL AGENTS
+        # ---------------------------------
+
+        discovered = (
+            self.external_registry
+            .discover()
+        )
+
+        self.manager.register_many(
+            discovered
         )
 
     # ---------------------------------
@@ -72,6 +126,72 @@ class ProviderSkill:
         message = message.strip()
         lower = message.lower()
 
+        # ---------------------------------
+        # PENDING EXTERNAL AGENT PERMISSION
+        # ---------------------------------
+
+        if self.permissions.has_pending():
+
+            response = (
+                self.permissions
+                .interpret_response(
+                    message
+                )
+            )
+
+            if response == "approve":
+
+                pending = (
+                    self.permissions
+                    .consume()
+                )
+
+                data = (
+                    pending.get(
+                        "data",
+                        {}
+                    )
+                )
+
+                provider_name = (
+                    data.get(
+                        "provider",
+                        ""
+                    )
+                )
+
+                args = (
+                    data.get(
+                        "args",
+                        []
+                    )
+                )
+
+                return (
+                    self._execute_external_agent(
+                        provider_name,
+                        args
+                    )
+                )
+
+            if response == "deny":
+
+                self.permissions.cancel()
+
+                return (
+                    "Aether: External agent "
+                    "execution cancelled."
+                )
+
+            return (
+                "Aether: I am waiting for permission.\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
+
+        # ---------------------------------
+        # PROVIDER STATUS
+        # ---------------------------------
+
         if lower in (
             "show providers",
             "list providers",
@@ -79,7 +199,9 @@ class ProviderSkill:
             "what providers are available"
         ):
 
-            return self._show_providers()
+            return (
+                self._show_providers()
+            )
 
         if lower in (
             "show provider capabilities",
@@ -87,7 +209,101 @@ class ProviderSkill:
             "show capabilities"
         ):
 
-            return self._show_capabilities()
+            return (
+                self._show_capabilities()
+            )
+
+        # ---------------------------------
+        # EXTERNAL AGENTS
+        # ---------------------------------
+
+        if lower in (
+            "show external agents",
+            "list external agents",
+            "external agents",
+            "what external agents do you have"
+        ):
+
+            return (
+                self._show_external_agents()
+            )
+
+        info_prefixes = (
+            "external agent info ",
+            "show agent info ",
+            "agent info "
+        )
+
+        for prefix in info_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                provider_name = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
+                )
+
+                return (
+                    self._external_agent_info(
+                        provider_name
+                    )
+                )
+
+        preview_prefixes = (
+            "preview agent ",
+            "preview external agent "
+        )
+
+        for prefix in preview_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                request = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
+                )
+
+                return (
+                    self._preview_external_request(
+                        request
+                    )
+                )
+
+        run_prefixes = (
+            "run agent ",
+            "run external agent "
+        )
+
+        for prefix in run_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                request = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
+                )
+
+                return (
+                    self._request_external_execution(
+                        request
+                    )
+                )
+
+        # ---------------------------------
+        # OLLAMA
+        # ---------------------------------
 
         if lower in (
             "show ollama models",
@@ -96,7 +312,9 @@ class ProviderSkill:
             "what ollama models do i have"
         ):
 
-            return self._show_ollama_models()
+            return (
+                self._show_ollama_models()
+            )
 
         prefix = "ask ollama "
 
@@ -104,12 +322,17 @@ class ProviderSkill:
             prefix
         ):
 
-            request = message[
-                len(prefix):
-            ].strip()
+            request = (
+                message[
+                    len(prefix):
+                ]
+                .strip()
+            )
 
-            return self._ask_ollama(
-                request
+            return (
+                self._ask_ollama(
+                    request
+                )
             )
 
         return None
@@ -137,7 +360,9 @@ class ProviderSkill:
             self.manager.providers.values()
         ):
 
-            available = provider.available()
+            available = (
+                provider.available()
+            )
 
             status = (
                 "available"
@@ -145,8 +370,14 @@ class ProviderSkill:
                 else "offline"
             )
 
+            info = (
+                provider.info()
+            )
+
             output += (
                 f"- {provider.name}\n"
+                f"  Type: "
+                f"{info.get('type', 'generic')}\n"
                 f"  Status: {status}\n"
                 f"  Description: "
                 f"{provider.description}\n"
@@ -166,9 +397,19 @@ class ProviderSkill:
                     + "\n"
                 )
 
+            if info.get(
+                "requires_permission"
+            ):
+
+                output += (
+                    "  Permission: required\n"
+                )
+
             output += "\n"
 
-        return output.rstrip()
+        return (
+            output.rstrip()
+        )
 
     # ---------------------------------
     # SHOW CAPABILITIES
@@ -204,7 +445,495 @@ class ProviderSkill:
                 f"{', '.join(providers)}\n"
             )
 
-        return output.rstrip()
+        return (
+            output.rstrip()
+        )
+
+    # ---------------------------------
+    # SHOW EXTERNAL AGENTS
+    # ---------------------------------
+
+    def _show_external_agents(
+        self
+    ):
+
+        report = (
+            self.external_registry
+            .discovery_report()
+        )
+
+        output = (
+            "Aether: External Agent Discovery\n\n"
+        )
+
+        for item in report:
+
+            status = (
+                "installed"
+                if item.get(
+                    "installed"
+                )
+                else "not installed"
+            )
+
+            output += (
+                f"- {item.get('name')}\n"
+                f"  Status: {status}\n"
+                f"  Description: "
+                f"{item.get('description')}\n"
+            )
+
+            executable = (
+                item.get(
+                    "executable"
+                )
+            )
+
+            if executable:
+
+                output += (
+                    f"  Executable: "
+                    f"{executable}\n"
+                )
+
+            output += "\n"
+
+        output += (
+            "External-agent execution requires "
+            "explicit permission."
+        )
+
+        return (
+            output.rstrip()
+        )
+
+    # ---------------------------------
+    # EXTERNAL AGENT INFO
+    # ---------------------------------
+
+    def _external_agent_info(
+        self,
+        provider_name
+    ):
+
+        provider_name = (
+            provider_name.strip()
+        )
+
+        if not provider_name:
+
+            return (
+                "Aether: Which external "
+                "agent should I inspect?"
+            )
+
+        provider = (
+            self.manager.get(
+                provider_name
+            )
+        )
+
+        if provider is None:
+
+            return (
+                "Aether: External agent "
+                f'"{provider_name}" '
+                "is not registered."
+            )
+
+        if getattr(
+            provider,
+            "provider_type",
+            ""
+        ) != "external_agent":
+
+            return (
+                f'Aether: "{provider_name}" '
+                "is not an external-agent provider."
+            )
+
+        info = (
+            provider.info()
+        )
+
+        output = (
+            "Aether: External Agent\n\n"
+            f"Name: {info.get('name')}\n"
+            f"Available: "
+            f"{info.get('available')}\n"
+            f"Executable: "
+            f"{info.get('executable')}\n"
+            f"Executable path: "
+            f"{info.get('executable_path')}\n"
+            f"Working directory: "
+            f"{info.get('working_directory')}\n"
+            "Permission required: "
+            f"{info.get('requires_permission')}\n"
+            "Capabilities: "
+            f"{', '.join(info.get('capabilities', []))}"
+        )
+
+        return output
+
+    # ---------------------------------
+    # PARSE EXTERNAL REQUEST
+    # ---------------------------------
+
+    def _parse_external_request(
+        self,
+        request
+    ):
+
+        request = (
+            request.strip()
+        )
+
+        if not request:
+
+            return {
+                "success": False,
+                "error": (
+                    "No external agent "
+                    "request was provided."
+                )
+            }
+
+        if " -- " in request:
+
+            provider_name, raw_args = (
+                request.split(
+                    " -- ",
+                    1
+                )
+            )
+
+        else:
+
+            provider_name = (
+                request
+            )
+
+            raw_args = ""
+
+        provider_name = (
+            provider_name.strip()
+        )
+
+        if not provider_name:
+
+            return {
+                "success": False,
+                "error": (
+                    "No external agent "
+                    "name was provided."
+                )
+            }
+
+        try:
+
+            args = (
+                shlex.split(
+                    raw_args,
+                    posix=False
+                )
+                if raw_args
+                else []
+            )
+
+        except ValueError as error:
+
+            return {
+                "success": False,
+                "error": (
+                    "External-agent arguments "
+                    f"could not be parsed: {error}"
+                )
+            }
+
+        cleaned_args = []
+
+        for arg in args:
+
+            arg = (
+                str(arg)
+                .strip()
+            )
+
+            if (
+                len(arg) >= 2
+                and arg[0] == arg[-1]
+                and arg[0] in (
+                    '"',
+                    "'"
+                )
+            ):
+
+                arg = arg[
+                    1:-1
+                ]
+
+            cleaned_args.append(
+                arg
+            )
+
+        return {
+            "success": True,
+            "provider": provider_name,
+            "args": cleaned_args
+        }
+
+    # ---------------------------------
+    # PREVIEW EXTERNAL REQUEST
+    # ---------------------------------
+
+    def _preview_external_request(
+        self,
+        request
+    ):
+
+        parsed = (
+            self._parse_external_request(
+                request
+            )
+        )
+
+        if not parsed.get(
+            "success"
+        ):
+
+            return (
+                "Aether: "
+                + parsed.get(
+                    "error",
+                    "Invalid external-agent request."
+                )
+            )
+
+        provider_name = (
+            parsed["provider"]
+        )
+
+        provider = (
+            self.manager.get(
+                provider_name
+            )
+        )
+
+        if provider is None:
+
+            return (
+                "Aether: External agent "
+                f'"{provider_name}" '
+                "is not registered."
+            )
+
+        if getattr(
+            provider,
+            "provider_type",
+            ""
+        ) != "external_agent":
+
+            return (
+                f'Aether: "{provider_name}" '
+                "is not an external agent."
+            )
+
+        command = (
+            provider.preview_command(
+                {
+                    "args": (
+                        parsed["args"]
+                    )
+                }
+            )
+        )
+
+        return (
+            "Aether: External Agent Preview\n\n"
+            f"Provider: {provider_name}\n"
+            f"Available: {provider.available()}\n"
+            "Permission required: yes\n"
+            f"Command: {command}\n\n"
+            "Nothing was executed."
+        )
+
+    # ---------------------------------
+    # REQUEST EXTERNAL EXECUTION
+    # ---------------------------------
+
+    def _request_external_execution(
+        self,
+        request
+    ):
+
+        parsed = (
+            self._parse_external_request(
+                request
+            )
+        )
+
+        if not parsed.get(
+            "success"
+        ):
+
+            return (
+                "Aether: "
+                + parsed.get(
+                    "error",
+                    "Invalid external-agent request."
+                )
+            )
+
+        provider_name = (
+            parsed["provider"]
+        )
+
+        provider = (
+            self.manager.get(
+                provider_name
+            )
+        )
+
+        if provider is None:
+
+            return (
+                "Aether: External agent "
+                f'"{provider_name}" '
+                "is not registered."
+            )
+
+        if getattr(
+            provider,
+            "provider_type",
+            ""
+        ) != "external_agent":
+
+            return (
+                f'Aether: "{provider_name}" '
+                "is not an external agent."
+            )
+
+        if not provider.available():
+
+            return (
+                "Aether: External agent "
+                f'"{provider_name}" '
+                "is currently unavailable."
+            )
+
+        args = (
+            parsed["args"]
+        )
+
+        command = (
+            provider.preview_command(
+                {
+                    "args": args
+                }
+            )
+        )
+
+        self.permissions.request(
+            "external_agent_execution",
+            {
+                "provider": (
+                    provider_name
+                ),
+                "args": args
+            }
+        )
+
+        return (
+            "Aether: Permission required.\n\n"
+            f"External agent: "
+            f"{provider_name}\n"
+            f"Command: {command}\n\n"
+            "External agents may read or modify "
+            "project files depending on their "
+            "arguments and capabilities.\n\n"
+            'Say "yes" to approve or '
+            '"no" to cancel.'
+        )
+
+    # ---------------------------------
+    # EXECUTE EXTERNAL AGENT
+    # ---------------------------------
+
+    def _execute_external_agent(
+        self,
+        provider_name,
+        args
+    ):
+
+        result = (
+            self.manager.execute(
+                "external_agent",
+                {
+                    "args": args
+                },
+                provider_name=(
+                    provider_name
+                )
+            )
+        )
+
+        self.last_execution_result = (
+            result
+        )
+
+        if not result.get(
+            "success"
+        ):
+
+            error = (
+                result.get(
+                    "stderr"
+                )
+                or result.get(
+                    "error"
+                )
+                or (
+                    "External agent "
+                    "execution failed."
+                )
+            )
+
+            return (
+                "Aether: External agent failed.\n\n"
+                f"Provider: {provider_name}\n"
+                f"{error}"
+            )
+
+        output = (
+            result.get(
+                "stdout",
+                ""
+            )
+            or result.get(
+                "response",
+                ""
+            )
+        )
+
+        if len(output) > 8000:
+
+            output = (
+                output[:8000]
+                + "\n\n[Output truncated]"
+            )
+
+        if not output:
+
+            output = (
+                "External agent completed "
+                "without text output."
+            )
+
+        return (
+            "Aether: External agent completed.\n\n"
+            f"Provider: {provider_name}\n\n"
+            f"{output}"
+        )
 
     # ---------------------------------
     # SHOW OLLAMA MODELS
@@ -214,10 +943,12 @@ class ProviderSkill:
         self
     ):
 
-        result = self.manager.execute(
-            "list_models",
-            {},
-            provider_name="ollama"
+        result = (
+            self.manager.execute(
+                "list_models",
+                {},
+                provider_name="ollama"
+            )
         )
 
         if not result.get(
@@ -229,9 +960,11 @@ class ProviderSkill:
                 f"{result.get('error', '')}"
             ).rstrip()
 
-        models = result.get(
-            "models",
-            []
+        models = (
+            result.get(
+                "models",
+                []
+            )
         )
 
         if not models:
@@ -251,7 +984,9 @@ class ProviderSkill:
                 f"- {model}\n"
             )
 
-        return output.rstrip()
+        return (
+            output.rstrip()
+        )
 
     # ---------------------------------
     # ASK OLLAMA
@@ -269,14 +1004,12 @@ class ProviderSkill:
                 "would like the local AI to do."
             )
 
-        # ---------------------------------
-        # GET INSTALLED MODELS
-        # ---------------------------------
-
-        model_result = self.manager.execute(
-            "list_models",
-            {},
-            provider_name="ollama"
+        model_result = (
+            self.manager.execute(
+                "list_models",
+                {},
+                provider_name="ollama"
+            )
         )
 
         if not model_result.get(
@@ -292,14 +1025,12 @@ class ProviderSkill:
                 f"{model_result.get('error', '')}"
             ).rstrip()
 
-        installed_models = model_result.get(
-            "models",
-            []
+        installed_models = (
+            model_result.get(
+                "models",
+                []
+            )
         )
-
-        # ---------------------------------
-        # EXPLICIT MODEL DETECTION
-        # ---------------------------------
 
         requested_model = None
         prompt = request
@@ -321,9 +1052,12 @@ class ProviderSkill:
                     installed_model
                 )
 
-                prompt = request[
-                    len(prefix):
-                ].strip()
+                prompt = (
+                    request[
+                        len(prefix):
+                    ]
+                    .strip()
+                )
 
                 break
 
@@ -334,15 +1068,13 @@ class ProviderSkill:
                 "like the model to do?"
             )
 
-        # ---------------------------------
-        # ROUTE MODEL
-        # ---------------------------------
-
-        route = self.router.choose(
-            prompt,
-            installed_models,
-            requested_model=(
-                requested_model
+        route = (
+            self.router.choose(
+                prompt,
+                installed_models,
+                requested_model=(
+                    requested_model
+                )
             )
         )
 
@@ -359,11 +1091,9 @@ class ProviderSkill:
                 f"{route.get('error', '')}"
             ).rstrip()
 
-        primary_model = route["model"]
-
-        # ---------------------------------
-        # PRIMARY ATTEMPTS
-        # ---------------------------------
+        primary_model = (
+            route["model"]
+        )
 
         attempts = []
         result = None
@@ -373,20 +1103,28 @@ class ProviderSkill:
             self.MAX_PRIMARY_ATTEMPTS + 1
         ):
 
-            result = self._generate(
-                route
+            result = (
+                self._generate(
+                    route
+                )
             )
 
             attempts.append(
                 {
                     "model": primary_model,
-                    "attempt": attempt_number,
-                    "success": result.get(
-                        "success",
-                        False
+                    "attempt": (
+                        attempt_number
                     ),
-                    "error": result.get(
-                        "error"
+                    "success": (
+                        result.get(
+                            "success",
+                            False
+                        )
+                    ),
+                    "error": (
+                        result.get(
+                            "error"
+                        )
                     )
                 }
             )
@@ -403,10 +1141,6 @@ class ProviderSkill:
             ):
 
                 break
-
-        # ---------------------------------
-        # FALLBACK MODEL
-        # ---------------------------------
 
         fallback_used = False
         fallback_model = None
@@ -448,8 +1182,10 @@ class ProviderSkill:
 
                     fallback_used = True
 
-                    result = self._generate(
-                        fallback_route
+                    result = (
+                        self._generate(
+                            fallback_route
+                        )
                     )
 
                     attempts.append(
@@ -458,12 +1194,16 @@ class ProviderSkill:
                                 fallback_model
                             ),
                             "attempt": 1,
-                            "success": result.get(
-                                "success",
-                                False
+                            "success": (
+                                result.get(
+                                    "success",
+                                    False
+                                )
                             ),
-                            "error": result.get(
-                                "error"
+                            "error": (
+                                result.get(
+                                    "error"
+                                )
                             ),
                             "fallback": True
                         }
@@ -473,11 +1213,9 @@ class ProviderSkill:
                         "success"
                     ):
 
-                        route = fallback_route
-
-        # ---------------------------------
-        # FINAL RESULT
-        # ---------------------------------
+                        route = (
+                            fallback_route
+                        )
 
         if result is None:
 
@@ -490,20 +1228,31 @@ class ProviderSkill:
                 )
             }
 
-        result["attempts"] = attempts
-        result["attempt_count"] = len(
+        result[
+            "attempts"
+        ] = attempts
+
+        result[
+            "attempt_count"
+        ] = len(
             attempts
         )
-        result["primary_model"] = (
-            primary_model
-        )
-        result["fallback_used"] = (
-            fallback_used
-        )
-        result["fallback_model"] = (
-            fallback_model
-        )
-        result["failure_type"] = (
+
+        result[
+            "primary_model"
+        ] = primary_model
+
+        result[
+            "fallback_used"
+        ] = fallback_used
+
+        result[
+            "fallback_model"
+        ] = fallback_model
+
+        result[
+            "failure_type"
+        ] = (
             self.resilience.classify(
                 result
             )
@@ -512,10 +1261,6 @@ class ProviderSkill:
         self.last_execution_result = (
             result
         )
-
-        # ---------------------------------
-        # FAILURE
-        # ---------------------------------
 
         if not result.get(
             "success"
@@ -528,14 +1273,13 @@ class ProviderSkill:
                 f"{result['attempt_count']}"
             ).rstrip()
 
-        # ---------------------------------
-        # SUCCESS
-        # ---------------------------------
-
-        response = result.get(
-            "response",
-            ""
-        ).strip()
+        response = (
+            result.get(
+                "response",
+                ""
+            )
+            .strip()
+        )
 
         if not response:
 
@@ -575,21 +1319,31 @@ class ProviderSkill:
         route
     ):
 
-        return self.manager.execute(
-            "generate_text",
-            {
-                "model": route["model"],
-                "prompt": route["prompt"],
-                "think": route["think"],
-                "num_ctx": route["num_ctx"],
-                "num_predict": (
-                    route["num_predict"]
-                ),
-                "keep_alive": (
-                    route["keep_alive"]
-                )
-            },
-            provider_name="ollama"
+        return (
+            self.manager.execute(
+                "generate_text",
+                {
+                    "model": (
+                        route["model"]
+                    ),
+                    "prompt": (
+                        route["prompt"]
+                    ),
+                    "think": (
+                        route["think"]
+                    ),
+                    "num_ctx": (
+                        route["num_ctx"]
+                    ),
+                    "num_predict": (
+                        route["num_predict"]
+                    ),
+                    "keep_alive": (
+                        route["keep_alive"]
+                    )
+                },
+                provider_name="ollama"
+            )
         )
 
     # ---------------------------------
