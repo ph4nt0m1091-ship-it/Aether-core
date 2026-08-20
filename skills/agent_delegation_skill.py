@@ -1,3 +1,5 @@
+import subprocess
+
 from providers.agent_delegator import (
     AgentDelegator
 )
@@ -8,18 +10,20 @@ class AgentDelegationSkill:
     Handles natural-language delegation to
     external-agent roles.
 
-    v1 plans and routes delegation.
+    Invocation Adapter v1:
 
-    It intentionally does not execute natural
-    tasks until an agent-specific invocation
-    adapter is available.
+    - selects worker
+    - builds exact provider command
+    - displays safe preview
+    - DOES NOT execute yet
     """
 
     name = "agent_delegation"
 
     description = (
-        "Plans natural-language delegation to "
-        "suitable external agents."
+        "Plans natural-language delegation "
+        "and builds provider-specific "
+        "external-agent invocations."
     )
 
     def __init__(
@@ -50,7 +54,9 @@ class AgentDelegationSkill:
             message or ""
         ).strip()
 
-        lower = message.lower()
+        lower = (
+            message.lower()
+        )
 
         if not (
             lower.startswith(
@@ -63,7 +69,7 @@ class AgentDelegationSkill:
 
             return None
 
-        # Preserve existing direct Ollama syntax.
+        # Keep existing Ollama behavior.
         if lower.startswith(
             "ask ollama "
         ):
@@ -90,7 +96,32 @@ class AgentDelegationSkill:
         )
 
     # ---------------------------------
-    # FORMAT
+    # FORMAT COMMAND
+    # ---------------------------------
+
+    def _format_command(
+        self,
+        command
+    ):
+
+        if not isinstance(
+            command,
+            list
+        ):
+
+            return str(
+                command
+            )
+
+        return subprocess.list2cmdline(
+            [
+                str(item)
+                for item in command
+            ]
+        )
+
+    # ---------------------------------
+    # FORMAT PLAN
     # ---------------------------------
 
     def _format_plan(
@@ -113,32 +144,69 @@ class AgentDelegationSkill:
         )
 
         # ---------------------------------
-        # INSTALLED WORKER SELECTED
+        # INVOCATION BUILT
         # ---------------------------------
 
-        if status == "planned":
+        if status == "invocation_built":
 
             selected = result.get(
                 "selected",
                 {}
             )
 
-            return (
-                "Aether: Agent Delegation Plan\n\n"
+            invocation = result.get(
+                "invocation",
+                {}
+            )
+
+            command = (
+                self._format_command(
+                    invocation.get(
+                        "command",
+                        []
+                    )
+                )
+            )
+
+            output = (
+                "Aether: Agent Delegation Preview\n\n"
                 f"Task: {task}\n"
                 f"Role: {role}\n"
                 "Selected worker: "
                 f"{selected.get('display_name')}\n"
                 "Profile: "
                 f"{selected.get('name')}\n"
-                "Installed: yes\n"
+                "Adapter: "
+                f"{invocation.get('adapter')}\n\n"
+                "Proposed command:\n"
+                f"{command}\n\n"
                 "Permission required: "
-                f"{selected.get('requires_permission')}\n\n"
-                "Routing is ready.\n"
-                "Natural-task execution is not "
-                "enabled for this worker yet, "
-                "so nothing was executed."
+                f"{result.get('requires_permission')}\n"
+                "Execution ready: "
+                f"{result.get('execution_ready')}\n"
             )
+
+            if not result.get(
+                "execution_ready"
+            ):
+
+                output += (
+                    "\nExecution remains locked.\n"
+                    + invocation.get(
+                        "execution_block_reason",
+                        (
+                            "This invocation has "
+                            "not yet passed its "
+                            "safety test."
+                        )
+                    )
+                )
+
+            output += (
+                "\n\nNothing was executed."
+            )
+
+            return output
 
         # ---------------------------------
         # NO INSTALLED WORKER
@@ -155,11 +223,9 @@ class AgentDelegationSkill:
                 "Known candidates:\n"
             )
 
-            for candidate in (
-                result.get(
-                    "candidates",
-                    []
-                )
+            for candidate in result.get(
+                "candidates",
+                []
             ):
 
                 output += (
@@ -177,8 +243,27 @@ class AgentDelegationSkill:
             return output.rstrip()
 
         # ---------------------------------
-        # CAPABILITY GAP / FAILURE
+        # NO ADAPTER
         # ---------------------------------
+
+        if status == "invocation_unavailable":
+
+            selected = result.get(
+                "selected",
+                {}
+            )
+
+            return (
+                "Aether: Agent Delegation\n\n"
+                f"Task: {task}\n"
+                f"Role: {role}\n"
+                "Selected worker: "
+                f"{selected.get('display_name')}\n\n"
+                "The worker is installed, but "
+                "Aether does not have a ready "
+                "invocation adapter for it yet.\n\n"
+                f"{result.get('error', '')}"
+            ).rstrip()
 
         return (
             "Aether: Agent Delegation\n\n"

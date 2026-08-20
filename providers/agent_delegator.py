@@ -2,17 +2,23 @@ import re
 
 from providers.agent_router import AgentRouter
 
+from providers.invocation_adapters.registry import (
+    InvocationAdapterRegistry
+)
+
 
 class AgentDelegator:
     """
     Converts natural-language delegation requests
     into structured external-agent plans.
 
-    This layer does NOT execute an agent.
+    Flow:
 
-    Execution is handled later by the selected
-    agent's invocation adapter and Aether's
-    permission system.
+        natural request
+        -> infer role
+        -> route worker
+        -> build provider-specific invocation
+        -> permission/execution later
     """
 
     def __init__(
@@ -22,6 +28,10 @@ class AgentDelegator:
 
         self.router = AgentRouter(
             project_directory
+        )
+
+        self.adapters = (
+            InvocationAdapterRegistry()
         )
 
     # ---------------------------------
@@ -58,8 +68,13 @@ class AgentDelegator:
 
             return parsed
 
-        role = parsed["role"]
-        task = parsed["task"]
+        role = parsed[
+            "role"
+        ]
+
+        task = parsed[
+            "task"
+        ]
 
         route = self.router.route(
             role,
@@ -78,46 +93,7 @@ class AgentDelegator:
         )
 
         # ---------------------------------
-        # WORKER SELECTED
-        # ---------------------------------
-
-        if route.get(
-            "status"
-        ) == "selected":
-
-            selected = route.get(
-                "selected",
-                {}
-            )
-
-            return {
-                "success": True,
-                "status": "planned",
-                "role": role,
-                "task": task,
-                "selected": selected,
-                "provider": selected.get(
-                    "name"
-                ),
-                "requires_permission": (
-                    selected.get(
-                        "requires_permission",
-                        True
-                    )
-                ),
-                "execution_ready": False,
-                "reason": (
-                    "A suitable installed worker "
-                    "was selected. An invocation "
-                    "adapter is still required "
-                    "before natural-language task "
-                    "execution."
-                ),
-                "route": route
-            }
-
-        # ---------------------------------
-        # KNOWN BUT NOT INSTALLED
+        # NO INSTALLED WORKER
         # ---------------------------------
 
         if route.get(
@@ -126,7 +102,9 @@ class AgentDelegator:
 
             return {
                 "success": False,
-                "status": "worker_not_installed",
+                "status": (
+                    "worker_not_installed"
+                ),
                 "role": role,
                 "task": task,
                 "selected": None,
@@ -142,26 +120,109 @@ class AgentDelegator:
             }
 
         # ---------------------------------
-        # CAPABILITY GAP
+        # ROUTING FAILURE
         # ---------------------------------
 
+        if route.get(
+            "status"
+        ) != "selected":
+
+            return {
+                "success": False,
+                "status": route.get(
+                    "status",
+                    "routing_failed"
+                ),
+                "role": role,
+                "task": task,
+                "selected": None,
+                "candidates": route.get(
+                    "candidates",
+                    []
+                ),
+                "error": route.get(
+                    "error",
+                    "Agent routing failed."
+                ),
+                "route": route
+            }
+
+        selected = route.get(
+            "selected",
+            {}
+        )
+
+        provider_name = (
+            selected.get(
+                "name"
+            )
+        )
+
+        # ---------------------------------
+        # BUILD INVOCATION
+        # ---------------------------------
+
+        invocation = (
+            self.adapters.build(
+                provider_name=(
+                    provider_name
+                ),
+                task=task,
+                role=role
+            )
+        )
+
+        if not invocation.get(
+            "success"
+        ):
+
+            return {
+                "success": False,
+                "status": (
+                    "invocation_unavailable"
+                ),
+                "role": role,
+                "task": task,
+                "selected": selected,
+                "provider": (
+                    provider_name
+                ),
+                "invocation": invocation,
+                "error": invocation.get(
+                    "error",
+                    (
+                        "The worker was selected, "
+                        "but its invocation could "
+                        "not be built."
+                    )
+                ),
+                "route": route
+            }
+
         return {
-            "success": False,
-            "status": route.get(
-                "status",
-                "routing_failed"
+            "success": True,
+            "status": (
+                "invocation_built"
             ),
             "role": role,
             "task": task,
-            "selected": None,
-            "candidates": route.get(
-                "candidates",
-                []
+            "selected": selected,
+            "provider": (
+                provider_name
             ),
-            "error": route.get(
-                "error",
-                "Agent routing failed."
+            "requires_permission": (
+                invocation.get(
+                    "requires_permission",
+                    True
+                )
             ),
+            "execution_ready": (
+                invocation.get(
+                    "execution_ready",
+                    False
+                )
+            ),
+            "invocation": invocation,
             "route": route
         }
 
@@ -174,21 +235,21 @@ class AgentDelegator:
         request
     ):
 
-        lower = request.lower()
-
-        patterns = [
-            r"^ask\s+(?:an?\s+)?(.+?)\s+agent\s+to\s+(.+)$",
-            r"^delegate\s+(.+?)\s+to\s+(?:an?\s+)?(.+?)\s+agent$"
-        ]
-
-        role_text = None
-        task = None
+        lower = (
+            request.lower()
+        )
 
         first = re.match(
-            patterns[0],
+            (
+                r"^ask\s+(?:an?\s+)?"
+                r"(.+?)\s+agent\s+to\s+(.+)$"
+            ),
             request,
             re.IGNORECASE
         )
+
+        role_text = None
+        task = None
 
         if first:
 
@@ -205,7 +266,10 @@ class AgentDelegator:
         else:
 
             second = re.match(
-                patterns[1],
+                (
+                    r"^delegate\s+(.+?)\s+to\s+"
+                    r"(?:an?\s+)?(.+?)\s+agent$"
+                ),
                 request,
                 re.IGNORECASE
             )
@@ -261,26 +325,20 @@ class AgentDelegator:
     ):
 
         text = (
-            str(role_text)
+            str(
+                role_text
+            )
             + " "
-            + str(task)
+            + str(
+                task
+            )
         ).lower()
 
-        # Review must come before general coding.
-        if any(
-            phrase in text
-            for phrase in (
-                "review code",
-                "review my code",
-                "code review",
-                "review brain.py",
-                "review this file"
-            )
-        ) or (
+        if (
             "review" in text
             and any(
-                word in text
-                for word in (
+                value in text
+                for value in (
                     "code",
                     ".py",
                     ".js",
