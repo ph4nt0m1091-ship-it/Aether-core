@@ -2,6 +2,10 @@ import shutil
 
 from pathlib import Path
 
+from providers.agent_profile_registry import (
+    AgentProfileRegistry
+)
+
 from providers.external_cli_provider import (
     ExternalCLIProvider
 )
@@ -9,14 +13,11 @@ from providers.external_cli_provider import (
 
 class ExternalAgentRegistry:
     """
-    Discovers external agent CLIs that Aether may
-    integrate with.
+    Discovers external-agent CLIs known to Aether.
 
-    Discovery does NOT grant execution permission.
+    Agent identity and roles come from AgentProfileRegistry.
 
-    These definitions identify possible workers.
-    Actual task execution remains under Aether's
-    permission and workflow systems.
+    Discovery does not grant execution permission.
     """
 
     def __init__(
@@ -36,56 +37,28 @@ class ExternalAgentRegistry:
 
             self.project_directory = None
 
-        self.definitions = [
-            {
-                "name": "claude_code",
-                "executables": [
-                    "claude"
-                ],
-                "description": (
-                    "Claude Code command-line agent."
-                )
-            },
-            {
-                "name": "codex_cli",
-                "executables": [
-                    "codex"
-                ],
-                "description": (
-                    "Codex-compatible command-line "
-                    "coding agent."
-                )
-            },
-            {
-                "name": "hermes",
-                "executables": [
-                    "hermes"
-                ],
-                "description": (
-                    "Hermes-compatible command-line "
-                    "agent."
-                )
-            }
-        ]
+        self.profile_registry = (
+            AgentProfileRegistry()
+        )
 
     # ---------------------------------
     # DISCOVER
     # ---------------------------------
 
-    def discover(self):
+    def discover(
+        self
+    ):
 
         providers = []
 
-        for definition in (
-            self.definitions
+        for profile in (
+            self.profile_registry
+            .enabled()
         ):
 
             executable = (
                 self._find_executable(
-                    definition.get(
-                        "executables",
-                        []
-                    )
+                    profile.executables
                 )
             )
 
@@ -96,21 +69,25 @@ class ExternalAgentRegistry:
             provider = (
                 ExternalCLIProvider(
                     provider_name=(
-                        definition["name"]
+                        profile.name
                     ),
-                    executable=executable,
+                    executable=(
+                        executable
+                    ),
                     capabilities=[
                         "external_agent"
                     ],
                     description=(
-                        definition[
-                            "description"
-                        ]
+                        profile.description
                     ),
                     working_directory=(
                         self.project_directory
                     )
                 )
+            )
+
+            provider.agent_profile = (
+                profile
             )
 
             providers.append(
@@ -123,42 +100,109 @@ class ExternalAgentRegistry:
     # DISCOVERY REPORT
     # ---------------------------------
 
-    def discovery_report(self):
+    def discovery_report(
+        self
+    ):
 
         report = []
 
-        for definition in (
-            self.definitions
+        for profile in (
+            self.profile_registry
+            .enabled()
         ):
 
             executable = (
                 self._find_executable(
-                    definition.get(
-                        "executables",
-                        []
-                    )
+                    profile.executables
                 )
             )
 
             report.append(
                 {
                     "name": (
-                        definition["name"]
+                        profile.name
+                    ),
+                    "display_name": (
+                        profile.display_name
                     ),
                     "installed": (
                         executable
                         is not None
                     ),
-                    "executable": executable,
+                    "executable": (
+                        executable
+                    ),
                     "description": (
-                        definition[
-                            "description"
-                        ]
+                        profile.description
+                    ),
+                    "roles": list(
+                        profile.roles
+                    ),
+                    "execution_type": (
+                        profile.execution_type
+                    ),
+                    "requires_permission": (
+                        profile
+                        .requires_permission
+                    ),
+                    "local_model_support": (
+                        profile
+                        .local_model_support
+                    ),
+                    "cloud_support": (
+                        profile.cloud_support
                     )
                 }
             )
 
         return report
+
+    # ---------------------------------
+    # FIND BY ROLE
+    # ---------------------------------
+
+    def find_by_role(
+        self,
+        role,
+        installed_only=True
+    ):
+
+        matches = []
+
+        profiles = (
+            self.profile_registry
+            .find_by_role(
+                role
+            )
+        )
+
+        for profile in profiles:
+
+            executable = (
+                self._find_executable(
+                    profile.executables
+                )
+            )
+
+            if (
+                installed_only
+                and executable is None
+            ):
+
+                continue
+
+            matches.append(
+                {
+                    "profile": (
+                        profile
+                    ),
+                    "executable": (
+                        executable
+                    )
+                }
+            )
+
+        return matches
 
     # ---------------------------------
     # FIND EXECUTABLE
@@ -169,7 +213,9 @@ class ExternalAgentRegistry:
         candidates
     ):
 
-        for candidate in candidates:
+        for candidate in (
+            candidates or []
+        ):
 
             path = shutil.which(
                 candidate
