@@ -11,10 +11,12 @@ class WorkflowSkill:
     Workflows can:
     - Execute multiple skills/providers
     - Use external AI providers
+    - Use permission-gated external agents
     - Pass structured data between workflow steps
     - Reference previous or specific step results
     - Save workflow results to files
     - Pause for terminal permission
+    - Pause for external-agent permission
     - Resume after approval
     - Survive Aether restarts
     - Recover unfinished work safely
@@ -97,8 +99,10 @@ class WorkflowSkill:
 
         if self.pending_workflow is not None:
 
-            return self._handle_pending_workflow(
-                message
+            return (
+                self._handle_pending_workflow(
+                    message
+                )
             )
 
         # ---------------------------------
@@ -125,7 +129,9 @@ class WorkflowSkill:
             "continue last workflow"
         ):
 
-            return self._resume_saved_workflow()
+            return (
+                self._resume_saved_workflow()
+            )
 
         # ---------------------------------
         # CANCEL WORKFLOW
@@ -136,7 +142,9 @@ class WorkflowSkill:
             "cancel current workflow"
         ):
 
-            return self._cancel_saved_workflow()
+            return (
+                self._cancel_saved_workflow()
+            )
 
         # ---------------------------------
         # NEW WORKFLOW
@@ -166,8 +174,10 @@ class WorkflowSkill:
                 "like the workflow to do?"
             )
 
-        workflow = self._build_workflow(
-            request
+        workflow = (
+            self._build_workflow(
+                request
+            )
         )
 
         if len(workflow) == 0:
@@ -177,8 +187,10 @@ class WorkflowSkill:
                 "a workflow from that request."
             )
 
-        result = self.engine.execute(
-            workflow
+        result = (
+            self.engine.execute(
+                workflow
+            )
         )
 
         if result.get(
@@ -201,9 +213,11 @@ class WorkflowSkill:
 
             self.recovered_workflow = None
 
-        return self._format_result(
-            workflow,
-            result
+        return (
+            self._format_result(
+                workflow,
+                result
+            )
         )
 
     # ---------------------------------
@@ -221,7 +235,9 @@ class WorkflowSkill:
                 "is not connected."
             )
 
-        workflow = self.recovered_workflow
+        workflow = (
+            self.recovered_workflow
+        )
 
         if workflow is None:
 
@@ -241,8 +257,10 @@ class WorkflowSkill:
             workflow
         )
 
-        result = self.engine.execute(
-            workflow
+        result = (
+            self.engine.execute(
+                workflow
+            )
         )
 
         if result.get(
@@ -261,9 +279,64 @@ class WorkflowSkill:
 
             self.recovered_workflow = None
 
-        return self._format_result(
-            workflow,
-            result
+        return (
+            self._format_result(
+                workflow,
+                result
+            )
+        )
+
+    # ---------------------------------
+    # FIND PENDING PERMISSION SKILL
+    # ---------------------------------
+
+    def _pending_permission_skill(
+        self
+    ):
+
+        terminal_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "terminal"
+            )
+        )
+
+        provider_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "providers"
+            )
+        )
+
+        if (
+            terminal_skill is not None
+            and terminal_skill
+            .permissions
+            .has_pending()
+        ):
+
+            return (
+                "terminal",
+                terminal_skill
+            )
+
+        if (
+            provider_skill is not None
+            and provider_skill
+            .permissions
+            .has_pending()
+        ):
+
+            return (
+                "providers",
+                provider_skill
+            )
+
+        return (
+            None,
+            None
         )
 
     # ---------------------------------
@@ -275,22 +348,18 @@ class WorkflowSkill:
         message
     ):
 
-        terminal_skill = (
-            self.skill_manager
-            .registry
-            .get_skill(
-                "terminal"
-            )
+        permission_source, skill = (
+            self._pending_permission_skill()
         )
 
-        if terminal_skill is None:
+        workflow = (
+            self.pending_workflow
+        )
 
-            workflow = (
-                self.pending_workflow
-            )
+        if skill is None:
 
             workflow.status = (
-                "cancelled"
+                "paused"
             )
 
             workflow.touch()
@@ -300,37 +369,56 @@ class WorkflowSkill:
             )
 
             self.pending_workflow = None
-            self.recovered_workflow = None
+            self.recovered_workflow = (
+                workflow
+            )
 
             return (
-                "Aether: Terminal skill is unavailable. "
-                "Workflow cancelled."
+                "Aether: The workflow permission "
+                "request is no longer active.\n"
+                "Use \"resume workflow\" to recreate "
+                "the permission request safely."
             )
 
         permission_response = (
-            terminal_skill.handle(
+            skill.handle(
                 message
             )
         )
 
         if (
-            terminal_skill
-            .permissions
+            skill.permissions
             .has_pending()
         ):
 
-            return permission_response
-
-        workflow = self.pending_workflow
+            return (
+                permission_response
+            )
 
         # ---------------------------------
         # USER DENIED
         # ---------------------------------
 
-        if (
-            permission_response
-            == "Aether: Command cancelled."
-        ):
+        denied = False
+
+        if permission_source == "terminal":
+
+            denied = (
+                permission_response
+                == "Aether: Command cancelled."
+            )
+
+        elif permission_source == "providers":
+
+            denied = (
+                permission_response
+                == (
+                    "Aether: External agent "
+                    "execution cancelled."
+                )
+            )
+
+        if denied:
 
             workflow.status = (
                 "cancelled"
@@ -359,77 +447,223 @@ class WorkflowSkill:
         if workflow.has_next_step():
 
             workflow.current_step += 1
+
             workflow.touch()
 
         # ---------------------------------
-        # COMMAND FAILED
+        # TERMINAL RESULT
         # ---------------------------------
 
-        if (
-            permission_response
-            .startswith(
-                "Aether: Command failed."
-            )
-        ):
+        if permission_source == "terminal":
+
+            if (
+                permission_response
+                .startswith(
+                    "Aether: Command failed."
+                )
+            ):
+
+                workflow.add_result(
+                    {
+                        "success": False,
+                        "paused": False,
+                        "type": "skill",
+                        "action": "terminal",
+                        "response": (
+                            permission_response
+                        ),
+                        "error": (
+                            permission_response
+                        )
+                    }
+                )
+
+                workflow.status = (
+                    "failed"
+                )
+
+                workflow.touch()
+
+                self.engine.store.save(
+                    workflow
+                )
+
+                self.pending_workflow = None
+                self.recovered_workflow = None
+
+                return (
+                    self._format_result(
+                        workflow,
+                        {
+                            "success": False,
+                            "paused": False,
+                            "status": "failed",
+                            "progress": (
+                                workflow.progress()
+                            ),
+                            "results": (
+                                workflow.results
+                            )
+                        }
+                    )
+                )
 
             workflow.add_result(
                 {
-                    "success": False,
+                    "success": True,
                     "paused": False,
                     "type": "skill",
                     "action": "terminal",
                     "response": (
                         permission_response
                     ),
-                    "error": (
+                    "output": (
                         permission_response
                     )
                 }
             )
 
-            workflow.status = (
-                "failed"
+        # ---------------------------------
+        # EXTERNAL PROVIDER RESULT
+        # ---------------------------------
+
+        elif permission_source == "providers":
+
+            provider_result = getattr(
+                skill,
+                "last_execution_result",
+                None
             )
 
-            workflow.touch()
+            if (
+                provider_result is None
+                or not provider_result.get(
+                    "success",
+                    False
+                )
+            ):
 
-            self.engine.store.save(
-                workflow
+                error = (
+                    provider_result.get(
+                        "error"
+                    )
+                    if isinstance(
+                        provider_result,
+                        dict
+                    )
+                    else permission_response
+                )
+
+                workflow.add_result(
+                    {
+                        "success": False,
+                        "paused": False,
+                        "type": "skill",
+                        "action": "providers",
+                        "response": (
+                            permission_response
+                        ),
+                        "provider": (
+                            provider_result.get(
+                                "provider"
+                            )
+                            if isinstance(
+                                provider_result,
+                                dict
+                            )
+                            else None
+                        ),
+                        "error": (
+                            error
+                            or permission_response
+                        )
+                    }
+                )
+
+                workflow.status = (
+                    "failed"
+                )
+
+                workflow.touch()
+
+                self.engine.store.save(
+                    workflow
+                )
+
+                self.pending_workflow = None
+                self.recovered_workflow = None
+
+                return (
+                    self._format_result(
+                        workflow,
+                        {
+                            "success": False,
+                            "paused": False,
+                            "status": "failed",
+                            "progress": (
+                                workflow.progress()
+                            ),
+                            "results": (
+                                workflow.results
+                            )
+                        }
+                    )
+                )
+
+            answer = (
+                provider_result.get(
+                    "response",
+                    ""
+                )
+                or provider_result.get(
+                    "stdout",
+                    ""
+                )
             )
 
-            self.pending_workflow = None
-            self.recovered_workflow = None
-
-            return self._format_result(
-                workflow,
+            workflow.add_result(
                 {
-                    "success": False,
+                    "success": True,
                     "paused": False,
-                    "status": "failed",
-                    "progress": (
-                        workflow.progress()
+                    "type": "skill",
+                    "action": "providers",
+                    "response": (
+                        permission_response
                     ),
-                    "results": (
-                        workflow.results
+                    "answer": answer,
+                    "output": answer,
+                    "provider": (
+                        provider_result.get(
+                            "provider"
+                        )
+                    ),
+                    "provider_type": (
+                        provider_result.get(
+                            "provider_type"
+                        )
+                    ),
+                    "capability": (
+                        provider_result.get(
+                            "capability"
+                        )
+                    ),
+                    "returncode": (
+                        provider_result.get(
+                            "returncode"
+                        )
+                    ),
+                    "stdout": (
+                        provider_result.get(
+                            "stdout"
+                        )
+                    ),
+                    "stderr": (
+                        provider_result.get(
+                            "stderr"
+                        )
                     )
                 }
             )
-
-        # ---------------------------------
-        # APPROVED COMMAND COMPLETED
-        # ---------------------------------
-
-        workflow.add_result(
-            {
-                "success": True,
-                "paused": False,
-                "type": "skill",
-                "action": "terminal",
-                "response": (
-                    permission_response
-                )
-            }
-        )
 
         self.engine.store.save(
             workflow
@@ -437,8 +671,10 @@ class WorkflowSkill:
 
         self.pending_workflow = None
 
-        result = self.engine.execute(
-            workflow
+        result = (
+            self.engine.execute(
+                workflow
+            )
         )
 
         if result.get(
@@ -461,9 +697,11 @@ class WorkflowSkill:
 
             self.recovered_workflow = None
 
-        return self._format_result(
-            workflow,
-            result
+        return (
+            self._format_result(
+                workflow,
+                result
+            )
         )
 
     # ---------------------------------
@@ -555,9 +793,21 @@ class WorkflowSkill:
             )
         )
 
+        provider_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "providers"
+            )
+        )
+
         if terminal_skill is not None:
 
             terminal_skill.permissions.cancel()
+
+        if provider_skill is not None:
+
+            provider_skill.permissions.cancel()
 
         workflow.status = (
             "cancelled"
@@ -648,8 +898,10 @@ class WorkflowSkill:
 
         for part in parts:
 
-            part = self._normalize_references(
-                part
+            part = (
+                self._normalize_references(
+                    part
+                )
             )
 
             lower = part.lower()
@@ -690,6 +942,67 @@ class WorkflowSkill:
                         "content": (
                             content_reference
                         )
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # EXTERNAL AGENT
+            #
+            # Must come before TERMINAL,
+            # because "run agent ..." also
+            # starts with "run ".
+            # -------------------------
+
+            if (
+                lower.startswith(
+                    "run agent "
+                )
+                or lower.startswith(
+                    "run external agent "
+                )
+            ):
+
+                workflow.add_step(
+                    "skill",
+                    "providers",
+                    {
+                        "message": part
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # EXTERNAL AGENT INFO/PREVIEW
+            # -------------------------
+
+            if (
+                lower.startswith(
+                    "preview agent "
+                )
+                or lower.startswith(
+                    "preview external agent "
+                )
+                or lower.startswith(
+                    "external agent info "
+                )
+                or lower.startswith(
+                    "agent info "
+                )
+                or lower in (
+                    "show external agents",
+                    "list external agents",
+                    "external agents"
+                )
+            ):
+
+                workflow.add_step(
+                    "skill",
+                    "providers",
+                    {
+                        "message": part
                     }
                 )
 
@@ -810,7 +1123,9 @@ class WorkflowSkill:
                 )
             ):
 
-                search_message = part
+                search_message = (
+                    part
+                )
 
                 if (
                     lower.startswith(
@@ -915,10 +1230,14 @@ class WorkflowSkill:
                 "success"
             ):
 
-                output += "complete\n"
+                output += (
+                    "complete\n"
+                )
 
-                response = item.get(
-                    "response"
+                response = (
+                    item.get(
+                        "response"
+                    )
                 )
 
                 if response:
@@ -945,9 +1264,11 @@ class WorkflowSkill:
                     == "list_processes"
                 ):
 
-                    count = item.get(
-                        "count",
-                        0
+                    count = (
+                        item.get(
+                            "count",
+                            0
+                        )
                     )
 
                     output += (
@@ -957,7 +1278,9 @@ class WorkflowSkill:
 
             else:
 
-                output += "failed\n"
+                output += (
+                    "failed\n"
+                )
 
                 output += (
                     item.get(
@@ -991,7 +1314,9 @@ class WorkflowSkill:
                 f"{permission_message}"
             )
 
-            return output.rstrip()
+            return (
+                output.rstrip()
+            )
 
         output += (
             f"Workflow status: "
@@ -1000,7 +1325,9 @@ class WorkflowSkill:
             f"{result.get('progress')}%"
         )
 
-        return output.rstrip()
+        return (
+            output.rstrip()
+        )
 
     # ---------------------------------
     # MISSION EXECUTION

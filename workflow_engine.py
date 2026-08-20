@@ -17,7 +17,8 @@ class WorkflowEngine:
     - structured workflow results
     - workflow field references
     - external AI failure propagation
-    - permission-aware terminal pauses
+    - terminal permission pauses
+    - external-agent permission pauses
     - persistent workflow state
     - persistent execution history
     """
@@ -369,7 +370,7 @@ class WorkflowEngine:
                 }
 
             # ---------------------------------
-            # TERMINAL
+            # TERMINAL PERMISSION
             # ---------------------------------
 
             if action == "terminal":
@@ -394,6 +395,41 @@ class WorkflowEngine:
                         "paused": True,
                         "type": "skill",
                         "action": action,
+                        "permission_source": (
+                            "terminal"
+                        ),
+                        "response": response
+                    }
+
+            # ---------------------------------
+            # PROVIDER PERMISSION
+            # ---------------------------------
+
+            if action == "providers":
+
+                provider_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "providers"
+                    )
+                )
+
+                if (
+                    provider_skill is not None
+                    and provider_skill
+                    .permissions
+                    .has_pending()
+                ):
+
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "type": "skill",
+                        "action": action,
+                        "permission_source": (
+                            "providers"
+                        ),
                         "response": response
                     }
 
@@ -535,6 +571,16 @@ class WorkflowEngine:
                                         "provider"
                                     )
                                 ),
+                                "provider_type": (
+                                    provider_result.get(
+                                        "provider_type"
+                                    )
+                                ),
+                                "capability": (
+                                    provider_result.get(
+                                        "capability"
+                                    )
+                                ),
                                 "error": (
                                     provider_result.get(
                                         "error",
@@ -546,6 +592,10 @@ class WorkflowEngine:
                         answer = (
                             provider_result.get(
                                 "response",
+                                ""
+                            )
+                            or provider_result.get(
+                                "stdout",
                                 ""
                             )
                         )
@@ -565,6 +615,11 @@ class WorkflowEngine:
                                     "provider"
                                 )
                             ),
+                            "provider_type": (
+                                provider_result.get(
+                                    "provider_type"
+                                )
+                            ),
                             "model": (
                                 provider_result.get(
                                     "model"
@@ -573,6 +628,21 @@ class WorkflowEngine:
                             "capability": (
                                 provider_result.get(
                                     "capability"
+                                )
+                            ),
+                            "returncode": (
+                                provider_result.get(
+                                    "returncode"
+                                )
+                            ),
+                            "stdout": (
+                                provider_result.get(
+                                    "stdout"
+                                )
+                            ),
+                            "stderr": (
+                                provider_result.get(
+                                    "stderr"
                                 )
                             )
                         }

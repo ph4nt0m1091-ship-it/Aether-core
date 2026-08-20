@@ -17,6 +17,9 @@ from skills.workflow_skill import WorkflowSkill
 class SkillRegistry:
     """
     Stores and manages all of Aether's skills.
+
+    Permission-aware workflows must be checked before
+    skills that can hold their own pending permission.
     """
 
     def __init__(
@@ -42,6 +45,12 @@ class SkillRegistry:
             )
         )
 
+        self.provider_skill = (
+            ProviderSkill(
+                memory
+            )
+        )
+
         self.terminal_skill = (
             TerminalSkill(
                 memory
@@ -58,14 +67,15 @@ class SkillRegistry:
             ResearchSkill(memory),
             SystemSkill(memory),
             HistorySkill(memory),
-            ProviderSkill(memory),
 
             self.scheduler_skill,
             self.runtime_skill,
 
-            # Workflow must come before terminal
-            # so paused workflows can resume.
+            # Workflow must come before any skill that
+            # can hold a permission request.
             self.workflow_skill,
+
+            self.provider_skill,
             self.terminal_skill
         ]
 
