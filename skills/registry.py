@@ -8,6 +8,7 @@ from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
 from skills.history_skill import HistorySkill
 from skills.provider_skill import ProviderSkill
+from skills.agent_router_skill import AgentRouterSkill
 from skills.scheduler_skill import SchedulerSkill
 from skills.runtime_skill import RuntimeSkill
 from skills.terminal_skill import TerminalSkill
@@ -45,6 +46,12 @@ class SkillRegistry:
             )
         )
 
+        self.agent_router_skill = (
+            AgentRouterSkill(
+                memory
+            )
+        )
+
         self.provider_skill = (
             ProviderSkill(
                 memory
@@ -67,6 +74,8 @@ class SkillRegistry:
             ResearchSkill(memory),
             SystemSkill(memory),
             HistorySkill(memory),
+
+            self.agent_router_skill,
 
             self.scheduler_skill,
             self.runtime_skill,
