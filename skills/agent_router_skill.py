@@ -56,23 +56,13 @@ class AgentRouterSkill:
 
         self.last_route = None
 
-        # ---------------------------------
-        # KNOWN ROLES
-        # ---------------------------------
-
         if lower in (
             "show agent roles",
             "list agent roles",
             "what agent roles are available"
         ):
 
-            return (
-                self._show_roles()
-            )
-
-        # ---------------------------------
-        # INSTALLED AGENTS
-        # ---------------------------------
+            return self._show_roles()
 
         if lower in (
             "show installed agents",
@@ -80,44 +70,30 @@ class AgentRouterSkill:
             "what agents are installed"
         ):
 
-            return (
-                self._show_installed()
-            )
+            return self._show_installed()
 
-        # ---------------------------------
-        # FIND AGENT
-        # ---------------------------------
-
-        role = (
-            self._extract_role(
-                message
-            )
+        role = self._extract_role(
+            message
         )
 
         if role is None:
 
             return None
 
+        padded = (
+            " "
+            + lower
+            + " "
+        )
+
         prefer_local = (
-            " local " in (
-                " "
-                + lower
-                + " "
-            )
-            or lower.startswith(
-                "local "
-            )
+            " local "
+            in padded
         )
 
         prefer_cloud = (
-            " cloud " in (
-                " "
-                + lower
-                + " "
-            )
-            or lower.startswith(
-                "cloud "
-            )
+            " cloud "
+            in padded
         )
 
         result = (
@@ -132,14 +108,10 @@ class AgentRouterSkill:
             )
         )
 
-        self.last_route = (
-            result
-        )
+        self.last_route = result
 
-        return (
-            self._format_route(
-                result
-            )
+        return self._format_route(
+            result
         )
 
     # ---------------------------------
@@ -154,8 +126,8 @@ class AgentRouterSkill:
         patterns = [
             r"^find\s+(?:me\s+)?(?:an?\s+)?(.+?)\s+agent$",
             r"^find\s+(?:an?\s+)?agent\s+for\s+(.+)$",
-            r"^which\s+agent\s+can\s+(.+)$",
             r"^which\s+agent\s+can\s+do\s+(.+)$",
+            r"^which\s+agent\s+can\s+(.+)$",
             r"^what\s+agent\s+can\s+(.+)$",
             r"^select\s+(?:an?\s+)?(.+?)\s+agent$"
         ]
@@ -178,13 +150,9 @@ class AgentRouterSkill:
                 .lower()
             )
 
-            role = (
-                self._infer_role(
-                    raw_role
-                )
+            return self._infer_role(
+                raw_role
             )
-
-            return role
 
         return None
 
@@ -197,9 +165,32 @@ class AgentRouterSkill:
         text
     ):
 
-        text = (
-            text.lower()
-        )
+        text = text.lower()
+
+        # Review first so "review code"
+        # does not fall into general coding.
+        if any(
+            phrase in text
+            for phrase in (
+                "review code",
+                "code review",
+                "review my code",
+                "review"
+            )
+        ):
+
+            return "code_review"
+
+        if any(
+            phrase in text
+            for phrase in (
+                "debug",
+                "fix bug",
+                "fix bugs"
+            )
+        ):
+
+            return "debugging"
 
         if any(
             word in text
@@ -213,28 +204,6 @@ class AgentRouterSkill:
         ):
 
             return "coding"
-
-        if any(
-            word in text
-            for word in (
-                "debug",
-                "fix bug",
-                "fix bugs"
-            )
-        ):
-
-            return "debugging"
-
-        if any(
-            phrase in text
-            for phrase in (
-                "review code",
-                "code review",
-                "review my code"
-            )
-        ):
-
-            return "code_review"
 
         if any(
             word in text
@@ -269,11 +238,8 @@ class AgentRouterSkill:
 
             return "general_agent"
 
-        return (
-            self.router
-            .normalize_role(
-                text
-            )
+        return self.router.normalize_role(
+            text
         )
 
     # ---------------------------------
@@ -285,34 +251,29 @@ class AgentRouterSkill:
         result
     ):
 
-        status = (
-            result.get(
-                "status"
-            )
+        status = result.get(
+            "status"
         )
 
-        role = (
-            result.get(
-                "role",
-                "unknown"
-            )
+        role = result.get(
+            "role",
+            "unknown"
         )
 
         if status == "selected":
 
-            selected = (
-                result["selected"]
-            )
+            selected = result[
+                "selected"
+            ]
 
-            output = (
+            return (
                 "Aether: Agent Router\n\n"
                 f"Requested role: {role}\n"
                 "Selected worker: "
                 f"{selected['display_name']}\n"
-                f"Profile: "
-                f"{selected['name']}\n"
+                f"Profile: {selected['name']}\n"
                 "Installed: yes\n"
-                f"Execution type: "
+                "Execution type: "
                 f"{selected['execution_type']}\n"
                 "Permission required: "
                 f"{selected['requires_permission']}\n"
@@ -321,8 +282,6 @@ class AgentRouterSkill:
                 "Cloud support: "
                 f"{selected['cloud_support']}"
             )
-
-            return output
 
         if status == "not_installed":
 
@@ -334,27 +293,23 @@ class AgentRouterSkill:
                 "Known candidates:\n"
             )
 
-            for item in (
-                result.get(
-                    "candidates",
-                    []
-                )
+            for item in result.get(
+                "candidates",
+                []
             ):
 
                 output += (
                     f"- {item['display_name']}\n"
                 )
 
-            return (
-                output.rstrip()
-            )
+            return output.rstrip()
 
         if status == "capability_gap":
 
             return (
                 "Aether: Agent Router\n\n"
-                f"No known external agent "
-                f"supports role \"{role}\"."
+                "No known external agent "
+                f'supports role "{role}".'
             )
 
         return (
@@ -396,9 +351,7 @@ class AgentRouterSkill:
                 f"{', '.join(agent.get('roles', []))}\n"
             )
 
-        return (
-            output.rstrip()
-        )
+        return output.rstrip()
 
     # ---------------------------------
     # SHOW ROLES
@@ -423,9 +376,7 @@ class AgentRouterSkill:
                 f"- {role}\n"
             )
 
-        return (
-            output.rstrip()
-        )
+        return output.rstrip()
 
     # ---------------------------------
     # EXECUTE

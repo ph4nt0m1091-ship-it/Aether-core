@@ -13,7 +13,7 @@ from skills.scheduler_skill import SchedulerSkill
 from skills.runtime_skill import RuntimeSkill
 from skills.terminal_skill import TerminalSkill
 from skills.workflow_skill import WorkflowSkill
-
+from skills.agent_delegation_skill import AgentDelegationSkill
 
 class SkillRegistry:
     """
@@ -52,6 +52,12 @@ class SkillRegistry:
             )
         )
 
+        self.agent_delegation_skill = (
+            AgentDelegationSkill(
+                memory
+            )
+        )
+
         self.provider_skill = (
             ProviderSkill(
                 memory
@@ -75,6 +81,7 @@ class SkillRegistry:
             SystemSkill(memory),
             HistorySkill(memory),
 
+            self.agent_delegation_skill,
             self.agent_router_skill,
 
             self.scheduler_skill,
