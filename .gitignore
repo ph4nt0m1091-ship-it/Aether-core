@@ -12,6 +12,8 @@ venv/
 # Operating System
 .DS_Store
 Thumbs.db
+
+# Aether persistent runtime data
 storage/workflows.json
 storage/execution_history.json
 storage/scheduled_jobs.json
@@ -23,3 +25,6 @@ storage/background_heartbeat.json
 storage/supervisor.log
 storage/supervisor.pid
 storage/supervisor_runtime.lock
+
+# Aether encrypted secrets
+storage/secrets/
