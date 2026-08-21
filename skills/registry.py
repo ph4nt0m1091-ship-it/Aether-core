@@ -14,6 +14,8 @@ from skills.runtime_skill import RuntimeSkill
 from skills.terminal_skill import TerminalSkill
 from skills.workflow_skill import WorkflowSkill
 from skills.agent_delegation_skill import AgentDelegationSkill
+from skills.cloud_side_mode_skill import CloudSideModeSkill
+
 
 class SkillRegistry:
     """
@@ -42,6 +44,12 @@ class SkillRegistry:
 
         self.runtime_skill = (
             RuntimeSkill(
+                memory
+            )
+        )
+
+        self.cloud_side_mode_skill = (
+            CloudSideModeSkill(
                 memory
             )
         )
@@ -80,6 +88,11 @@ class SkillRegistry:
             ResearchSkill(memory),
             SystemSkill(memory),
             HistorySkill(memory),
+
+            # Cloud commands are explicit and
+            # privacy-gated before any future
+            # cloud provider receives data.
+            self.cloud_side_mode_skill,
 
             self.agent_delegation_skill,
             self.agent_router_skill,
