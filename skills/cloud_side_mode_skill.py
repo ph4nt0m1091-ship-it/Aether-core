@@ -6,6 +6,10 @@ from policies.cloud_side_mode import (
     CloudSideMode
 )
 
+from policies.cloud_request_guard import (
+    CloudRequestGuard
+)
+
 from providers.cloud_provider_registry import (
     CloudProviderRegistry
 )
@@ -15,21 +19,21 @@ class CloudSideModeSkill:
     """
     Controls Aether's optional Cloud Side Mode.
 
-    Cloud Execution v1:
+    Cloud Safety + Control v2:
 
     - Local remains the default.
     - Cloud must be explicitly requested.
-    - Privacy policy runs before provider routing.
+    - Privacy policy runs first.
     - Provider must be configured.
-    - Explicit Aether permission is required.
-    - Network execution only happens after approval.
+    - Explicit user permission is required.
+    - Cloud request rate guard runs before execution.
     """
 
     name = "cloud_side_mode"
 
     description = (
-        "Controls Aether's optional privacy-gated "
-        "and permission-gated cloud side mode."
+        "Controls Aether's optional privacy-gated, "
+        "permission-gated, rate-limited cloud mode."
     )
 
     def __init__(
@@ -49,6 +53,13 @@ class CloudSideModeSkill:
 
         self.permissions = (
             PermissionManager()
+        )
+
+        self.request_guard = (
+            CloudRequestGuard(
+                max_requests=5,
+                window_seconds=60
+            )
         )
 
         self.last_evaluation = None
@@ -149,6 +160,20 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
+        # CLOUD GUARD STATUS
+        # ---------------------------------
+
+        if lower in (
+            "cloud guard",
+            "cloud guard status",
+            "show cloud guard"
+        ):
+
+            return (
+                self._show_guard()
+            )
+
+        # ---------------------------------
         # ENABLE CLOUD SIDE MODE
         # ---------------------------------
 
@@ -168,6 +193,7 @@ class CloudSideModeSkill:
                 "requested.\n\n"
                 "Privacy gate: active\n"
                 "Permission gate: active\n"
+                "Request guard: active\n"
                 "Cloud execution: enabled"
             )
 
@@ -288,10 +314,6 @@ class CloudSideModeSkill:
             else "none"
         )
 
-        # ---------------------------------
-        # BLOCK
-        # ---------------------------------
-
         if status == "privacy_blocked":
 
             return (
@@ -303,10 +325,6 @@ class CloudSideModeSkill:
                 "to a cloud provider.\n\n"
                 "Nothing was sent."
             )
-
-        # ---------------------------------
-        # LOCAL/PRIVATE DATA
-        # ---------------------------------
 
         if status == "permission_required":
 
@@ -330,10 +348,6 @@ class CloudSideModeSkill:
                 "Nothing was sent."
             )
 
-        # ---------------------------------
-        # PROVIDER
-        # ---------------------------------
-
         provider = (
             self._preferred_provider()
         )
@@ -349,10 +363,6 @@ class CloudSideModeSkill:
                 "is available.\n\n"
                 "Nothing was sent."
             )
-
-        # ---------------------------------
-        # REQUEST PERMISSION
-        # ---------------------------------
 
         self.permissions.request(
             "cloud_request_execution",
@@ -384,6 +394,7 @@ class CloudSideModeSkill:
             "This prompt would leave your computer "
             "and be processed by an external cloud "
             "provider.\n\n"
+            "Cloud request guard: active\n"
             "Cloud execution: enabled\n\n"
             'Say "yes" to approve or '
             '"no" to cancel.'
@@ -457,15 +468,9 @@ class CloudSideModeSkill:
 
             return (
                 "Aether: Cloud request approved.\n\n"
-                f"Provider: {provider_name}\n"
-                f"Request: {request}\n\n"
                 "Cloud execution safety lock: ON\n\n"
                 "Nothing was sent."
             )
-
-        # ---------------------------------
-        # RE-RESOLVE PROVIDER
-        # ---------------------------------
 
         provider = (
             self.providers.get(
@@ -501,17 +506,43 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
+        # CLOUD REQUEST GUARD
+        # ---------------------------------
+
+        guard = (
+            self.request_guard
+            .can_send()
+        )
+
+        if not guard.get(
+            "allowed"
+        ):
+
+            retry_after = (
+                guard.get(
+                    "retry_after_seconds",
+                    0
+                )
+            )
+
+            return (
+                "Aether: Cloud request temporarily "
+                "blocked.\n\n"
+                "Reason: cloud rate safety limit "
+                "reached.\n\n"
+                f"Limit: "
+                f"{guard.get('max_requests')} "
+                f"requests per "
+                f"{guard.get('window_seconds')} "
+                "seconds.\n"
+                f"Retry after approximately "
+                f"{retry_after} seconds.\n\n"
+                "Nothing was sent."
+            )
+
+        # ---------------------------------
         # EXECUTE
         # ---------------------------------
-        #
-        # This is the internet boundary.
-        #
-        # We only reach this point after:
-        #
-        # 1. explicit cloud request
-        # 2. privacy ALLOW
-        # 3. configured provider
-        # 4. explicit user permission
 
         result = (
             provider.execute(
@@ -525,6 +556,10 @@ class CloudSideModeSkill:
         self.last_cloud_result = (
             result
         )
+
+        # Count only requests that actually
+        # crossed into provider execution.
+        self.request_guard.record_send()
 
         if not isinstance(
             result,
@@ -651,6 +686,11 @@ class CloudSideModeSkill:
             else "locked"
         )
 
+        guard = (
+            self.request_guard
+            .status()
+        )
+
         return (
             "Aether: Cloud Status\n\n"
             f"Mode: {state}\n"
@@ -658,8 +698,48 @@ class CloudSideModeSkill:
             "Cloud requests: explicit only\n"
             "Privacy gate: active\n"
             "Permission gate: active\n"
+            "Request guard: active\n"
+            f"Cloud requests used: "
+            f"{guard.get('current_requests')}/"
+            f"{guard.get('max_requests')} "
+            f"in {guard.get('window_seconds')} seconds\n"
             f"Configured providers: {provider_text}\n"
             f"Cloud execution: {execution_state}"
+        )
+
+    # ---------------------------------
+    # GUARD STATUS
+    # ---------------------------------
+
+    def _show_guard(
+        self
+    ):
+
+        guard = (
+            self.request_guard
+            .status()
+        )
+
+        allowed = (
+            "yes"
+            if guard.get(
+                "allowed"
+            )
+            else "no"
+        )
+
+        return (
+            "Aether: Cloud Request Guard\n\n"
+            f"Requests used: "
+            f"{guard.get('current_requests')}\n"
+            f"Maximum requests: "
+            f"{guard.get('max_requests')}\n"
+            f"Window: "
+            f"{guard.get('window_seconds')} seconds\n"
+            f"Cloud send currently allowed: "
+            f"{allowed}\n"
+            f"Retry after: "
+            f"{guard.get('retry_after_seconds')} seconds"
         )
 
     # ---------------------------------
@@ -734,6 +814,7 @@ class CloudSideModeSkill:
         output += (
             "Privacy gate: active\n"
             "Permission gate: active\n"
+            "Request guard: active\n"
             "Cloud execution: "
             + (
                 "enabled"
