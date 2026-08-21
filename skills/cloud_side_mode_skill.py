@@ -1,3 +1,7 @@
+from permissions.permission_manager import (
+    PermissionManager
+)
+
 from policies.cloud_side_mode import (
     CloudSideMode
 )
@@ -11,14 +15,14 @@ class CloudSideModeSkill:
     """
     Controls Aether's optional Cloud Side Mode.
 
-    Cloud Provider Integration v1:
+    Cloud Permission Bridge v1:
 
     - Local remains the default.
     - Cloud must be explicitly requested.
-    - Privacy policy runs first.
-    - Cloud provider registry runs second.
-    - Provider configuration is visible.
-    - Actual cloud execution remains locked.
+    - Privacy policy runs before provider routing.
+    - Provider must be configured.
+    - Explicit Aether permission is required.
+    - Actual network execution remains locked.
 
     Nothing is sent to a cloud provider in v1.
     """
@@ -27,7 +31,7 @@ class CloudSideModeSkill:
 
     description = (
         "Controls Aether's optional privacy-gated "
-        "cloud side mode and cloud providers."
+        "and permission-gated cloud side mode."
     )
 
     def __init__(
@@ -45,17 +49,17 @@ class CloudSideModeSkill:
             CloudProviderRegistry()
         )
 
+        self.permissions = (
+            PermissionManager()
+        )
+
         self.last_evaluation = None
 
         self.last_cloud_result = None
 
         # ---------------------------------
-        # SAFETY LOCK
+        # NETWORK EXECUTION SAFETY LOCK
         # ---------------------------------
-        #
-        # Provider integration is being
-        # tested before network execution
-        # is enabled.
 
         self.cloud_execution_enabled = False
 
@@ -77,6 +81,48 @@ class CloudSideModeSkill:
         lower = (
             message.lower()
         )
+
+        # ---------------------------------
+        # PENDING CLOUD PERMISSION
+        # ---------------------------------
+
+        if self.permissions.has_pending():
+
+            response = (
+                self.permissions
+                .interpret_response(
+                    message
+                )
+            )
+
+            if response == "approve":
+
+                pending = (
+                    self.permissions
+                    .consume()
+                )
+
+                return (
+                    self._handle_approval(
+                        pending
+                    )
+                )
+
+            if response == "deny":
+
+                self.permissions.cancel()
+
+                return (
+                    "Aether: Cloud request cancelled.\n\n"
+                    "Nothing was sent."
+                )
+
+            return (
+                "Aether: I am waiting for cloud "
+                "permission.\n"
+                'Say "yes" to approve or '
+                '"no" to cancel.'
+            )
 
         # ---------------------------------
         # CLOUD STATUS
@@ -124,14 +170,15 @@ class CloudSideModeSkill:
             return (
                 "Aether: Cloud Side Mode enabled.\n\n"
                 "Normal Aether requests remain local.\n"
-                "Cloud is only used when you explicitly "
-                'say something like "ask cloud ...".\n\n'
+                "Cloud is only used when explicitly "
+                "requested.\n\n"
                 "Privacy gate: active\n"
+                "Permission gate: active\n"
                 "Cloud execution: locked"
             )
 
         # ---------------------------------
-        # LOCAL MODE
+        # RETURN TO LOCAL
         # ---------------------------------
 
         if lower in (
@@ -146,8 +193,7 @@ class CloudSideModeSkill:
 
             return (
                 "Aether: Local mode enabled.\n\n"
-                "Cloud Side Mode is off.\n"
-                "Normal requests remain local."
+                "Cloud Side Mode is off."
             )
 
         # ---------------------------------
@@ -169,10 +215,7 @@ class CloudSideModeSkill:
                 prefix
             ):
 
-                matched_prefix = (
-                    prefix
-                )
-
+                matched_prefix = prefix
                 break
 
         if matched_prefix is None:
@@ -214,7 +257,7 @@ class CloudSideModeSkill:
         )
 
     # ---------------------------------
-    # CLOUD REQUEST
+    # HANDLE CLOUD REQUEST
     # ---------------------------------
 
     def _handle_cloud_request(
@@ -252,7 +295,7 @@ class CloudSideModeSkill:
         )
 
         # ---------------------------------
-        # PRIVACY BLOCK
+        # BLOCK
         # ---------------------------------
 
         if status == "privacy_blocked":
@@ -263,12 +306,13 @@ class CloudSideModeSkill:
                 "Privacy decision: BLOCK\n"
                 f"Reasons: {reason_text}\n\n"
                 "Aether will not send this request "
-                "to any cloud provider.\n\n"
+                "to a cloud provider.\n\n"
                 "Nothing was sent."
             )
 
         # ---------------------------------
-        # PERMISSION REQUIRED
+        # LOCAL DATA NEEDS DIFFERENT
+        # PERMISSION FLOW LATER
         # ---------------------------------
 
         if status == "permission_required":
@@ -279,16 +323,11 @@ class CloudSideModeSkill:
                 "Privacy decision: ASK FIRST\n"
                 f"Reasons: {reason_text}\n\n"
                 "This request may involve local "
-                "or private information.\n\n"
-                "Aether requires explicit permission "
-                "before local data may leave this "
-                "computer.\n\n"
+                "or private data.\n\n"
+                "Local-data upload permission is "
+                "not enabled yet.\n\n"
                 "Nothing was sent."
             )
-
-        # ---------------------------------
-        # NOT ALLOWED FOR OTHER REASON
-        # ---------------------------------
 
         if status != "cloud_allowed":
 
@@ -299,11 +338,8 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # PRIVACY ALLOWED
+        # PROVIDER
         # ---------------------------------
-        #
-        # Now — and only now — inspect
-        # cloud provider availability.
 
         provider = (
             self._preferred_provider()
@@ -317,41 +353,148 @@ class CloudSideModeSkill:
                 "Privacy decision: ALLOW\n"
                 f"Reasons: {reason_text}\n\n"
                 "No configured cloud provider "
-                "is currently available.\n\n"
+                "is available.\n\n"
                 "Nothing was sent."
             )
 
         # ---------------------------------
-        # EXECUTION SAFETY LOCK
+        # REQUEST PERMISSION
         # ---------------------------------
 
-        if not self.cloud_execution_enabled:
-
-            return (
-                "Aether: Cloud Request Ready\n\n"
-                f"Request: {request}\n\n"
-                "Privacy decision: ALLOW\n"
-                f"Reasons: {reason_text}\n"
-                f"Provider: {provider.name}\n"
-                "Provider configured: "
-                f"{provider.configured()}\n\n"
-                "Cloud execution safety lock: ON\n\n"
-                "The privacy gate and provider "
-                "routing succeeded, but network "
-                "execution is still disabled.\n\n"
-                "Nothing was sent."
-            )
-
-        # ---------------------------------
-        # FUTURE EXECUTION PATH
-        # ---------------------------------
-        #
-        # Intentionally unreachable while
-        # cloud_execution_enabled is False.
+        self.permissions.request(
+            "cloud_request_execution",
+            {
+                "provider": (
+                    provider.name
+                ),
+                "request": request,
+                "capability": (
+                    "cloud_generate_text"
+                ),
+                "privacy_decision": (
+                    "allow"
+                ),
+                "privacy_reasons": (
+                    list(
+                        reasons
+                    )
+                )
+            }
+        )
 
         return (
-            "Aether: Cloud execution is not "
-            "enabled in this version."
+            "Aether: Cloud Permission Required\n\n"
+            f"Request:\n{request}\n\n"
+            f"Provider: {provider.name}\n"
+            "Privacy decision: ALLOW\n"
+            f"Reasons: {reason_text}\n\n"
+            "This prompt would leave your computer "
+            "and be processed by an external cloud "
+            "provider.\n\n"
+            "Cloud execution safety lock: ON\n\n"
+            'Say "yes" to approve or '
+            '"no" to cancel.'
+        )
+
+    # ---------------------------------
+    # HANDLE APPROVAL
+    # ---------------------------------
+
+    def _handle_approval(
+        self,
+        pending
+    ):
+
+        if not isinstance(
+            pending,
+            dict
+        ):
+
+            return (
+                "Aether: Invalid cloud permission "
+                "data.\n\n"
+                "Nothing was sent."
+            )
+
+        action = (
+            pending.get(
+                "action"
+            )
+        )
+
+        data = (
+            pending.get(
+                "data",
+                {}
+            )
+        )
+
+        if action != (
+            "cloud_request_execution"
+        ):
+
+            return (
+                "Aether: Unknown cloud permission "
+                "action.\n\n"
+                "Nothing was sent."
+            )
+
+        provider_name = (
+            data.get(
+                "provider",
+                "unknown"
+            )
+        )
+
+        request = (
+            data.get(
+                "request",
+                ""
+            )
+        )
+
+        # ---------------------------------
+        # SAFETY LOCK
+        # ---------------------------------
+        #
+        # Permission behavior is being
+        # proven before network execution
+        # is enabled.
+
+        result = {
+            "success": False,
+            "status": (
+                "approved_but_locked"
+            ),
+            "provider": (
+                provider_name
+            ),
+            "request": request,
+            "approved": True,
+            "sent": False,
+            "execution_enabled": (
+                self.cloud_execution_enabled
+            ),
+            "reason": (
+                "Cloud permission was approved, "
+                "but network execution remains "
+                "safety-locked."
+            )
+        }
+
+        self.last_cloud_result = (
+            result
+        )
+
+        return (
+            "Aether: Cloud request approved.\n\n"
+            f"Provider: {provider_name}\n"
+            f"Request: {request}\n\n"
+            "Cloud execution safety lock: ON\n\n"
+            "The permission bridge worked, but "
+            "network execution is still disabled "
+            "for this safety test.\n\n"
+            "Nothing was sent."
         )
 
     # ---------------------------------
@@ -371,11 +514,6 @@ class CloudSideModeSkill:
 
             return None
 
-        # v1 uses the first configured
-        # provider.
-        #
-        # Later this becomes CloudRouter.
-
         return configured[0]
 
     # ---------------------------------
@@ -391,17 +529,11 @@ class CloudSideModeSkill:
             .current_mode()
         )
 
-        if mode == "cloud":
-
-            state = (
-                "Cloud Side Mode enabled"
-            )
-
-        else:
-
-            state = (
-                "Local mode"
-            )
+        state = (
+            "Cloud Side Mode enabled"
+            if mode == "cloud"
+            else "Local mode"
+        )
 
         configured = (
             self.providers
@@ -433,12 +565,13 @@ class CloudSideModeSkill:
             "Normal requests: local\n"
             "Cloud requests: explicit only\n"
             "Privacy gate: active\n"
+            "Permission gate: active\n"
             f"Configured providers: {provider_text}\n"
             f"Cloud execution: {execution_state}"
         )
 
     # ---------------------------------
-    # SHOW PROVIDERS
+    # PROVIDERS
     # ---------------------------------
 
     def _show_providers(
@@ -507,6 +640,8 @@ class CloudSideModeSkill:
             )
 
         output += (
+            "Privacy gate: active\n"
+            "Permission gate: active\n"
             "Cloud execution safety lock: "
             + (
                 "OFF"
@@ -518,6 +653,34 @@ class CloudSideModeSkill:
         return (
             output.rstrip()
         )
+
+    # ---------------------------------
+    # PENDING
+    # ---------------------------------
+
+    def has_pending_permission(
+        self
+    ):
+
+        return (
+            self.permissions
+            .has_pending()
+        )
+
+    def cancel_pending_permission(
+        self
+    ):
+
+        if not (
+            self.permissions
+            .has_pending()
+        ):
+
+            return False
+
+        self.permissions.cancel()
+
+        return True
 
     # ---------------------------------
     # EXECUTE
