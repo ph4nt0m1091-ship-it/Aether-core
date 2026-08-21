@@ -1,10 +1,13 @@
 import json
-import os
 import urllib.error
 import urllib.request
 
 from providers.cloud_provider import (
     CloudProvider
+)
+
+from security.secret_store import (
+    SecretStore
 )
 
 
@@ -14,13 +17,11 @@ class OpenRouterProvider(
     """
     OpenRouter cloud AI provider.
 
-    IMPORTANT:
+    Credentials are retrieved from Aether's
+    encrypted SecretStore.
 
-    This provider does NOT decide whether a prompt
-    is private enough for cloud use.
-
-    Aether's CloudPrivacyPolicy must approve the
-    request before execute() is called.
+    Privacy approval must happen before this
+    provider is called.
     """
 
     provider_type = "cloud_ai"
@@ -36,6 +37,18 @@ class OpenRouterProvider(
 
     REQUEST_TIMEOUT = 60
 
+    SECRET_NAME = (
+        "openrouter_api_key"
+    )
+
+    def __init__(
+        self
+    ):
+
+        self.secrets = (
+            SecretStore()
+        )
+
     @property
     def name(
         self
@@ -50,7 +63,7 @@ class OpenRouterProvider(
 
         return (
             "OpenRouter cloud AI provider "
-            "with optional free-model routing."
+            "with encrypted local credential storage."
         )
 
     # ---------------------------------
@@ -61,13 +74,21 @@ class OpenRouterProvider(
         self
     ):
 
-        return (
-            os.environ.get(
-                "OPENROUTER_API_KEY",
-                ""
+        try:
+
+            value = (
+                self.secrets.get(
+                    self.SECRET_NAME
+                )
             )
-            .strip()
-        )
+
+        except Exception:
+
+            return ""
+
+        return str(
+            value or ""
+        ).strip()
 
     # ---------------------------------
     # CONFIGURED
@@ -77,9 +98,17 @@ class OpenRouterProvider(
         self
     ):
 
-        return bool(
-            self.api_key()
-        )
+        try:
+
+            return (
+                self.secrets.exists(
+                    self.SECRET_NAME
+                )
+            )
+
+        except Exception:
+
+            return False
 
     # ---------------------------------
     # AVAILABLE
@@ -89,14 +118,9 @@ class OpenRouterProvider(
         self
     ):
 
-        # v1 deliberately treats configuration
-        # as availability.
-        #
-        # We do not perform a network probe merely
-        # to check status.
-        return (
-            self.configured()
-        )
+        # Do not make a network request just
+        # to determine provider status.
+        return self.configured()
 
     # ---------------------------------
     # CAPABILITIES
@@ -109,6 +133,26 @@ class OpenRouterProvider(
         return [
             "cloud_generate_text"
         ]
+
+    # ---------------------------------
+    # CREDENTIAL STATUS
+    # ---------------------------------
+
+    def credential_status(
+        self
+    ):
+
+        return {
+            "configured": (
+                self.configured()
+            ),
+            "storage": (
+                "windows_dpapi"
+            ),
+            "secret_name": (
+                self.SECRET_NAME
+            )
+        }
 
     # ---------------------------------
     # EXECUTE
@@ -126,9 +170,7 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "error": (
                     "Unsupported OpenRouter "
                     f'capability "{capability}".'
@@ -139,15 +181,30 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "status": (
                     "not_configured"
                 ),
                 "error": (
-                    "OpenRouter is not configured. "
-                    "OPENROUTER_API_KEY is missing."
+                    "OpenRouter is not configured."
+                )
+            }
+
+        key = (
+            self.api_key()
+        )
+
+        if not key:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "status": (
+                    "credential_unavailable"
+                ),
+                "error": (
+                    "OpenRouter credential could "
+                    "not be retrieved."
                 )
             }
 
@@ -178,9 +235,7 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "error": (
                     "No cloud prompt "
                     "was provided."
@@ -209,7 +264,7 @@ class OpenRouterProvider(
                 headers={
                     "Authorization": (
                         "Bearer "
-                        + self.api_key()
+                        + key
                     ),
                     "Content-Type": (
                         "application/json"
@@ -255,9 +310,7 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "status": (
                     "http_error"
                 ),
@@ -281,9 +334,7 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "status": (
                     "request_failed"
                 ),
@@ -303,9 +354,7 @@ class OpenRouterProvider(
 
             return {
                 "success": False,
-                "provider": (
-                    self.name
-                ),
+                "provider": self.name,
                 "status": (
                     "empty_response"
                 ),
@@ -332,22 +381,16 @@ class OpenRouterProvider(
 
         return {
             "success": True,
-            "provider": (
-                self.name
-            ),
+            "provider": self.name,
             "provider_type": (
                 self.provider_type
             ),
-            "capability": (
-                capability
-            ),
+            "capability": capability,
             "model": data.get(
                 "model",
                 model
             ),
-            "response": (
-                content
-            ),
+            "response": content,
             "usage": data.get(
                 "usage",
                 {}
