@@ -17,11 +17,11 @@ class OpenRouterProvider(
     """
     OpenRouter cloud AI provider.
 
-    Credentials are retrieved from Aether's
-    encrypted SecretStore.
-
-    Privacy approval must happen before this
-    provider is called.
+    Safety rules:
+    - Credentials come from encrypted SecretStore.
+    - Provider status never performs a network request.
+    - Paid models are blocked by default.
+    - Only explicitly free OpenRouter routes may execute.
     """
 
     provider_type = "cloud_ai"
@@ -40,6 +40,10 @@ class OpenRouterProvider(
     SECRET_NAME = (
         "openrouter_api_key"
     )
+
+    # Aether must remain free-only unless
+    # we deliberately redesign this policy later.
+    FREE_ONLY = True
 
     def __init__(
         self
@@ -63,7 +67,8 @@ class OpenRouterProvider(
 
         return (
             "OpenRouter cloud AI provider "
-            "with encrypted local credential storage."
+            "with encrypted local credential storage "
+            "and free-model enforcement."
         )
 
     # ---------------------------------
@@ -135,6 +140,35 @@ class OpenRouterProvider(
         ]
 
     # ---------------------------------
+    # FREE MODEL CHECK
+    # ---------------------------------
+
+    def is_free_model(
+        self,
+        model
+    ):
+
+        model = str(
+            model or ""
+        ).strip().lower()
+
+        if not model:
+
+            return False
+
+        if model == "openrouter/free":
+
+            return True
+
+        if model.endswith(
+            ":free"
+        ):
+
+            return True
+
+        return False
+
+    # ---------------------------------
     # CREDENTIAL STATUS
     # ---------------------------------
 
@@ -155,6 +189,26 @@ class OpenRouterProvider(
         }
 
     # ---------------------------------
+    # SAFETY STATUS
+    # ---------------------------------
+
+    def safety_status(
+        self
+    ):
+
+        return {
+            "free_only": (
+                self.FREE_ONLY
+            ),
+            "default_model": (
+                self.DEFAULT_MODEL
+            ),
+            "paid_models_allowed": (
+                not self.FREE_ONLY
+            )
+        }
+
+    # ---------------------------------
     # EXECUTE
     # ---------------------------------
 
@@ -171,40 +225,12 @@ class OpenRouterProvider(
             return {
                 "success": False,
                 "provider": self.name,
+                "status": (
+                    "unsupported_capability"
+                ),
                 "error": (
                     "Unsupported OpenRouter "
                     f'capability "{capability}".'
-                )
-            }
-
-        if not self.configured():
-
-            return {
-                "success": False,
-                "provider": self.name,
-                "status": (
-                    "not_configured"
-                ),
-                "error": (
-                    "OpenRouter is not configured."
-                )
-            }
-
-        key = (
-            self.api_key()
-        )
-
-        if not key:
-
-            return {
-                "success": False,
-                "provider": self.name,
-                "status": (
-                    "credential_unavailable"
-                ),
-                "error": (
-                    "OpenRouter credential could "
-                    "not be retrieved."
                 )
             }
 
@@ -236,9 +262,78 @@ class OpenRouterProvider(
             return {
                 "success": False,
                 "provider": self.name,
+                "status": (
+                    "missing_prompt"
+                ),
                 "error": (
                     "No cloud prompt "
                     "was provided."
+                )
+            }
+
+        # ---------------------------------
+        # FREE-ONLY COST GUARD
+        # ---------------------------------
+        #
+        # This check happens before:
+        #
+        # - retrieving the API key
+        # - constructing the request
+        # - opening a network connection
+        #
+        # A paid model therefore cannot reach
+        # the internet while FREE_ONLY is active.
+
+        if (
+            self.FREE_ONLY
+            and not self.is_free_model(
+                model
+            )
+        ):
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "status": (
+                    "paid_model_blocked"
+                ),
+                "model": model,
+                "sent": False,
+                "error": (
+                    "Aether blocked this model "
+                    "because OpenRouter is currently "
+                    "configured for free models only."
+                )
+            }
+
+        if not self.configured():
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "status": (
+                    "not_configured"
+                ),
+                "error": (
+                    "OpenRouter is not configured."
+                )
+            }
+
+        key = (
+            self.api_key()
+        )
+
+        if not key:
+
+            return {
+                "success": False,
+                "provider": self.name,
+                "status": (
+                    "credential_unavailable"
+                ),
+                "error": (
+                    "OpenRouter credential could "
+                    "not be retrieved."
                 )
             }
 
