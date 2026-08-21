@@ -15,16 +15,14 @@ class CloudSideModeSkill:
     """
     Controls Aether's optional Cloud Side Mode.
 
-    Cloud Permission Bridge v1:
+    Cloud Execution v1:
 
     - Local remains the default.
     - Cloud must be explicitly requested.
     - Privacy policy runs before provider routing.
     - Provider must be configured.
     - Explicit Aether permission is required.
-    - Actual network execution remains locked.
-
-    Nothing is sent to a cloud provider in v1.
+    - Network execution only happens after approval.
     """
 
     name = "cloud_side_mode"
@@ -57,11 +55,7 @@ class CloudSideModeSkill:
 
         self.last_cloud_result = None
 
-        # ---------------------------------
-        # NETWORK EXECUTION SAFETY LOCK
-        # ---------------------------------
-
-        self.cloud_execution_enabled = False
+        self.cloud_execution_enabled = True
 
     # ---------------------------------
     # HANDLE
@@ -174,7 +168,7 @@ class CloudSideModeSkill:
                 "requested.\n\n"
                 "Privacy gate: active\n"
                 "Permission gate: active\n"
-                "Cloud execution: locked"
+                "Cloud execution: enabled"
             )
 
         # ---------------------------------
@@ -311,8 +305,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # LOCAL DATA NEEDS DIFFERENT
-        # PERMISSION FLOW LATER
+        # LOCAL/PRIVATE DATA
         # ---------------------------------
 
         if status == "permission_required":
@@ -391,7 +384,7 @@ class CloudSideModeSkill:
             "This prompt would leave your computer "
             "and be processed by an external cloud "
             "provider.\n\n"
-            "Cloud execution safety lock: ON\n\n"
+            "Cloud execution: enabled\n\n"
             'Say "yes" to approve or '
             '"no" to cancel.'
         )
@@ -439,62 +432,161 @@ class CloudSideModeSkill:
                 "Nothing was sent."
             )
 
-        provider_name = (
+        provider_name = str(
             data.get(
                 "provider",
-                "unknown"
+                ""
             )
-        )
+        ).strip()
 
-        request = (
+        request = str(
             data.get(
                 "request",
                 ""
             )
+        ).strip()
+
+        capability = str(
+            data.get(
+                "capability",
+                "cloud_generate_text"
+            )
+        ).strip()
+
+        if not self.cloud_execution_enabled:
+
+            return (
+                "Aether: Cloud request approved.\n\n"
+                f"Provider: {provider_name}\n"
+                f"Request: {request}\n\n"
+                "Cloud execution safety lock: ON\n\n"
+                "Nothing was sent."
+            )
+
+        # ---------------------------------
+        # RE-RESOLVE PROVIDER
+        # ---------------------------------
+
+        provider = (
+            self.providers.get(
+                provider_name
+            )
         )
 
+        if provider is None:
+
+            return (
+                "Aether: Cloud provider could "
+                "not be found.\n\n"
+                "Nothing was sent."
+            )
+
+        if not provider.configured():
+
+            return (
+                "Aether: Cloud provider is no "
+                "longer configured.\n\n"
+                "Nothing was sent."
+            )
+
+        if capability not in (
+            provider.capabilities()
+        ):
+
+            return (
+                "Aether: The selected cloud "
+                "provider cannot perform this "
+                "request.\n\n"
+                "Nothing was sent."
+            )
+
         # ---------------------------------
-        # SAFETY LOCK
+        # EXECUTE
         # ---------------------------------
         #
-        # Permission behavior is being
-        # proven before network execution
-        # is enabled.
+        # This is the internet boundary.
+        #
+        # We only reach this point after:
+        #
+        # 1. explicit cloud request
+        # 2. privacy ALLOW
+        # 3. configured provider
+        # 4. explicit user permission
 
-        result = {
-            "success": False,
-            "status": (
-                "approved_but_locked"
-            ),
-            "provider": (
-                provider_name
-            ),
-            "request": request,
-            "approved": True,
-            "sent": False,
-            "execution_enabled": (
-                self.cloud_execution_enabled
-            ),
-            "reason": (
-                "Cloud permission was approved, "
-                "but network execution remains "
-                "safety-locked."
+        result = (
+            provider.execute(
+                capability,
+                {
+                    "prompt": request
+                }
             )
-        }
+        )
 
         self.last_cloud_result = (
             result
         )
 
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return (
+                "Aether: Cloud provider returned "
+                "an invalid response."
+            )
+
+        if not result.get(
+            "success"
+        ):
+
+            status = (
+                result.get(
+                    "status",
+                    "failed"
+                )
+            )
+
+            error = (
+                result.get(
+                    "error",
+                    "Unknown cloud provider error."
+                )
+            )
+
+            return (
+                "Aether: Cloud request failed.\n\n"
+                f"Provider: {provider_name}\n"
+                f"Status: {status}\n\n"
+                f"{error}"
+            )
+
+        response = str(
+            result.get(
+                "response",
+                ""
+            )
+        ).strip()
+
+        model = str(
+            result.get(
+                "model",
+                "unknown"
+            )
+        ).strip()
+
+        if not response:
+
+            return (
+                "Aether: The cloud provider "
+                "returned an empty response."
+            )
+
         return (
-            "Aether: Cloud request approved.\n\n"
+            "Aether: Cloud Response\n\n"
             f"Provider: {provider_name}\n"
-            f"Request: {request}\n\n"
-            "Cloud execution safety lock: ON\n\n"
-            "The permission bridge worked, but "
-            "network execution is still disabled "
-            "for this safety test.\n\n"
-            "Nothing was sent."
+            f"Model: {model}\n\n"
+            f"{response}"
         )
 
     # ---------------------------------
@@ -642,11 +734,11 @@ class CloudSideModeSkill:
         output += (
             "Privacy gate: active\n"
             "Permission gate: active\n"
-            "Cloud execution safety lock: "
+            "Cloud execution: "
             + (
-                "OFF"
+                "enabled"
                 if self.cloud_execution_enabled
-                else "ON"
+                else "locked"
             )
         )
 
