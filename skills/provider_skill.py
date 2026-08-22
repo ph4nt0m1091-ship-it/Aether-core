@@ -1288,6 +1288,12 @@ class ProviderSkill:
             .strip()
         )
 
+        response = (
+            self._clean_local_ai_response(
+                response
+            )
+        )
+
         if not response:
 
             response = (
@@ -1316,6 +1322,139 @@ class ProviderSkill:
         )
 
         return output
+
+    # ---------------------------------
+    # CLEAN LOCAL AI RESPONSE
+    # ---------------------------------
+
+    def _clean_local_ai_response(
+        self,
+        response
+    ):
+
+        """
+        Remove internal reasoning markers that
+        some local models may return even when
+        thinking is disabled.
+
+        This only changes displayed text.
+        It does not modify model routing,
+        provider execution, retries, or fallback.
+        """
+
+        text = str(
+            response or ""
+        ).strip()
+
+        if not text:
+
+            return ""
+
+        # ---------------------------------
+        # COMPLETE <think>...</think> BLOCKS
+        # ---------------------------------
+
+        while True:
+
+            lower = (
+                text.lower()
+            )
+
+            start = (
+                lower.find(
+                    "<think>"
+                )
+            )
+
+            if start == -1:
+
+                break
+
+            end = (
+                lower.find(
+                    "</think>",
+                    start
+                )
+            )
+
+            if end == -1:
+
+                # An opening think marker without
+                # a closing marker means the rest
+                # is likely internal reasoning.
+                text = (
+                    text[:start]
+                    .strip()
+                )
+
+                break
+
+            end += len(
+                "</think>"
+            )
+
+            text = (
+                text[:start]
+                + text[end:]
+            ).strip()
+
+        # ---------------------------------
+        # ORPHAN </think> MARKER
+        # ---------------------------------
+
+        lower = (
+            text.lower()
+        )
+
+        closing = (
+            lower.rfind(
+                "</think>"
+            )
+        )
+
+        if closing != -1:
+
+            # Some Qwen responses expose reasoning
+            # followed by only the closing marker.
+            #
+            # In that case the useful final answer
+            # is normally after </think>.
+            after = (
+                text[
+                    closing
+                    + len("</think>"):
+                ]
+                .strip()
+            )
+
+            if after:
+
+                text = after
+
+            else:
+
+                text = (
+                    text[:closing]
+                    .strip()
+                )
+
+        # ---------------------------------
+        # REMOVE STRAY OPENING MARKERS
+        # ---------------------------------
+
+        text = (
+            text.replace(
+                "<think>",
+                ""
+            )
+            .replace(
+                "<THINK>",
+                ""
+            )
+            .strip()
+        )
+
+        return text
 
     # ---------------------------------
     # GENERATE
