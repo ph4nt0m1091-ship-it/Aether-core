@@ -26,6 +26,10 @@ from providers.cloud_provider_registry import (
     CloudProviderRegistry
 )
 
+from providers.ollama_provider import (
+    OllamaProvider
+)
+
 
 class CloudSideModeSkill:
     """
@@ -42,6 +46,7 @@ class CloudSideModeSkill:
     - safe cloud usage visibility
     - advisory cloud routing intelligence
     - local versus cloud advisor
+    - dynamic local Ollama model discovery
     """
 
     name = "cloud_side_mode"
@@ -65,6 +70,10 @@ class CloudSideModeSkill:
 
         self.providers = (
             CloudProviderRegistry()
+        )
+
+        self.ollama_provider = (
+            OllamaProvider()
         )
 
         self.permissions = (
@@ -236,6 +245,21 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
+        # LOCAL MODELS
+        # ---------------------------------
+
+        if lower in (
+            "local models",
+            "show local models",
+            "ollama models",
+            "show ollama models"
+        ):
+
+            return (
+                self._show_local_models()
+            )
+
+        # ---------------------------------
         # STATUS
         # ---------------------------------
 
@@ -317,6 +341,7 @@ class CloudSideModeSkill:
                 "Usage visibility: active\n"
                 "Route advisor: active\n"
                 "Local vs cloud advisor: active\n"
+                "Dynamic local model discovery: active\n"
                 "Cloud execution: enabled"
             )
 
@@ -400,6 +425,132 @@ class CloudSideModeSkill:
                 request,
                 evaluation
             )
+        )
+
+    # ---------------------------------
+    # DISCOVER LOCAL MODELS
+    # ---------------------------------
+
+    def _discover_local_models(
+        self
+    ):
+
+        result = (
+            self.ollama_provider.execute(
+                "list_models",
+                {}
+            )
+        )
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return {
+                "success": False,
+                "models": [],
+                "error": (
+                    "Ollama returned an invalid response."
+                )
+            }
+
+        if not result.get(
+            "success"
+        ):
+
+            return {
+                "success": False,
+                "models": [],
+                "error": (
+                    result.get(
+                        "error",
+                        "Unable to discover Ollama models."
+                    )
+                )
+            }
+
+        models = (
+            result.get(
+                "models",
+                []
+            )
+        )
+
+        models = [
+            str(
+                model
+            ).strip()
+            for model in models
+            if str(
+                model
+            ).strip()
+        ]
+
+        return {
+            "success": True,
+            "models": models,
+            "error": None
+        }
+
+    # ---------------------------------
+    # SHOW LOCAL MODELS
+    # ---------------------------------
+
+    def _show_local_models(
+        self
+    ):
+
+        discovery = (
+            self._discover_local_models()
+        )
+
+        if not discovery.get(
+            "success"
+        ):
+
+            return (
+                "Aether: Local Model Discovery\n\n"
+                "Ollama model discovery failed.\n\n"
+                f"Reason: "
+                f"{discovery.get('error')}\n\n"
+                "Nothing was executed."
+            )
+
+        models = (
+            discovery.get(
+                "models",
+                []
+            )
+        )
+
+        if not models:
+
+            return (
+                "Aether: Local Model Discovery\n\n"
+                "Ollama is reachable, but no local "
+                "models were found.\n\n"
+                "Nothing was executed."
+            )
+
+        output = (
+            "Aether: Local Model Discovery\n\n"
+            "Installed Ollama models:\n"
+        )
+
+        for model in models:
+
+            output += (
+                f"- {model}\n"
+            )
+
+        output += (
+            "\nSource: live local Ollama model list\n"
+            "Model execution: none"
+        )
+
+        return (
+            output.rstrip()
         )
 
     # ---------------------------------
@@ -560,15 +711,20 @@ class CloudSideModeSkill:
                 "like me to compare?"
             )
 
-        # These are Aether's known local model
-        # choices for Advisor v1.
-        #
-        # No model is executed here.
-        installed_models = [
-            "gemma3:1b",
-            "qwen3:4b",
-            "qwen3:8b"
-        ]
+        discovery = (
+            self._discover_local_models()
+        )
+
+        installed_models = (
+            discovery.get(
+                "models",
+                []
+            )
+            if discovery.get(
+                "success"
+            )
+            else []
+        )
 
         advice = (
             self.local_cloud_advisor
@@ -653,6 +809,22 @@ class CloudSideModeSkill:
             else "no"
         )
 
+        discovery_text = (
+            "live Ollama discovery"
+            if discovery.get(
+                "success"
+            )
+            else "Ollama discovery unavailable"
+        )
+
+        installed_text = (
+            ", ".join(
+                installed_models
+            )
+            if installed_models
+            else "none detected"
+        )
+
         return (
             "Aether: Local vs Cloud Advisor\n\n"
             f"Request:\n{request}\n\n"
@@ -666,7 +838,9 @@ class CloudSideModeSkill:
             f"Tier: "
             f"{local.get('tier')}\n"
             f"Private: {local_private}\n"
-            "Internet required: no\n\n"
+            "Internet required: no\n"
+            f"Model source: {discovery_text}\n"
+            f"Installed models: {installed_text}\n\n"
             "--- Cloud Option ---\n"
             f"Route: "
             f"{cloud.get('route')}\n"
@@ -1150,6 +1324,7 @@ class CloudSideModeSkill:
             "Usage visibility: active\n"
             "Route advisor: active\n"
             "Local vs cloud advisor: active\n"
+            "Dynamic local model discovery: active\n"
             f"Cloud requests used: "
             f"{guard.get('current_requests')}/"
             f"{guard.get('max_requests')} "
@@ -1336,6 +1511,7 @@ class CloudSideModeSkill:
             "Usage visibility: active\n"
             "Route advisor: active\n"
             "Local vs cloud advisor: active\n"
+            "Dynamic local model discovery: active\n"
             "Cloud execution: "
             + (
                 "enabled"
