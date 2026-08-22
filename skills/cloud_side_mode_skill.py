@@ -10,6 +10,10 @@ from policies.cloud_request_guard import (
     CloudRequestGuard
 )
 
+from policies.cloud_usage_tracker import (
+    CloudUsageTracker
+)
+
 from providers.cloud_provider_registry import (
     CloudProviderRegistry
 )
@@ -17,23 +21,25 @@ from providers.cloud_provider_registry import (
 
 class CloudSideModeSkill:
     """
-    Controls Aether's optional Cloud Side Mode.
+    Aether Cloud Side Mode.
 
-    Cloud Safety + Control v2:
-
-    - Local remains the default.
-    - Cloud must be explicitly requested.
-    - Privacy policy runs first.
-    - Provider must be configured.
-    - Explicit user permission is required.
-    - Cloud request rate guard runs before execution.
+    Safety stack:
+    - local by default
+    - explicit cloud requests only
+    - privacy gate
+    - configured provider requirement
+    - user permission gate
+    - rate guard
+    - provider free-model guard
+    - safe cloud usage visibility
     """
 
     name = "cloud_side_mode"
 
     description = (
-        "Controls Aether's optional privacy-gated, "
-        "permission-gated, rate-limited cloud mode."
+        "Controls Aether's privacy-gated, "
+        "permission-gated and rate-limited "
+        "cloud side mode."
     )
 
     def __init__(
@@ -62,8 +68,11 @@ class CloudSideModeSkill:
             )
         )
 
-        self.last_evaluation = None
+        self.usage_tracker = (
+            CloudUsageTracker()
+        )
 
+        self.last_evaluation = None
         self.last_cloud_result = None
 
         self.cloud_execution_enabled = True
@@ -88,7 +97,7 @@ class CloudSideModeSkill:
         )
 
         # ---------------------------------
-        # PENDING CLOUD PERMISSION
+        # PENDING PERMISSION
         # ---------------------------------
 
         if self.permissions.has_pending():
@@ -130,7 +139,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # CLOUD STATUS
+        # STATUS
         # ---------------------------------
 
         if lower in (
@@ -144,7 +153,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # CLOUD PROVIDERS
+        # PROVIDERS
         # ---------------------------------
 
         if lower in (
@@ -160,7 +169,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # CLOUD GUARD STATUS
+        # GUARD
         # ---------------------------------
 
         if lower in (
@@ -171,6 +180,20 @@ class CloudSideModeSkill:
 
             return (
                 self._show_guard()
+            )
+
+        # ---------------------------------
+        # USAGE
+        # ---------------------------------
+
+        if lower in (
+            "cloud usage",
+            "show cloud usage",
+            "cloud usage status"
+        ):
+
+            return (
+                self._show_usage()
             )
 
         # ---------------------------------
@@ -194,11 +217,12 @@ class CloudSideModeSkill:
                 "Privacy gate: active\n"
                 "Permission gate: active\n"
                 "Request guard: active\n"
+                "Usage visibility: active\n"
                 "Cloud execution: enabled"
             )
 
         # ---------------------------------
-        # RETURN TO LOCAL
+        # LOCAL MODE
         # ---------------------------------
 
         if lower in (
@@ -235,7 +259,10 @@ class CloudSideModeSkill:
                 prefix
             ):
 
-                matched_prefix = prefix
+                matched_prefix = (
+                    prefix
+                )
+
                 break
 
         if matched_prefix is None:
@@ -277,7 +304,7 @@ class CloudSideModeSkill:
         )
 
     # ---------------------------------
-    # HANDLE CLOUD REQUEST
+    # CLOUD REQUEST
     # ---------------------------------
 
     def _handle_cloud_request(
@@ -401,7 +428,7 @@ class CloudSideModeSkill:
         )
 
     # ---------------------------------
-    # HANDLE APPROVAL
+    # APPROVAL
     # ---------------------------------
 
     def _handle_approval(
@@ -505,10 +532,6 @@ class CloudSideModeSkill:
                 "Nothing was sent."
             )
 
-        # ---------------------------------
-        # CLOUD REQUEST GUARD
-        # ---------------------------------
-
         guard = (
             self.request_guard
             .can_send()
@@ -541,7 +564,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # EXECUTE
+        # INTERNET BOUNDARY
         # ---------------------------------
 
         result = (
@@ -557,8 +580,6 @@ class CloudSideModeSkill:
             result
         )
 
-        # Count only requests that actually
-        # crossed into provider execution.
         self.request_guard.record_send()
 
         if not isinstance(
@@ -566,14 +587,49 @@ class CloudSideModeSkill:
             dict
         ):
 
+            self.usage_tracker.record(
+                provider=provider_name,
+                model="unknown",
+                usage={},
+                success=False
+            )
+
             return (
                 "Aether: Cloud provider returned "
                 "an invalid response."
             )
 
-        if not result.get(
-            "success"
-        ):
+        success = bool(
+            result.get(
+                "success"
+            )
+        )
+
+        model = str(
+            result.get(
+                "model",
+                "unknown"
+            )
+        ).strip()
+
+        usage = (
+            result.get(
+                "usage",
+                {}
+            )
+        )
+
+        usage_record = (
+            self.usage_tracker
+            .record(
+                provider=provider_name,
+                model=model,
+                usage=usage,
+                success=success
+            )
+        )
+
+        if not success:
 
             status = (
                 result.get(
@@ -603,13 +659,6 @@ class CloudSideModeSkill:
             )
         ).strip()
 
-        model = str(
-            result.get(
-                "model",
-                "unknown"
-            )
-        ).strip()
-
         if not response:
 
             return (
@@ -617,11 +666,29 @@ class CloudSideModeSkill:
                 "returned an empty response."
             )
 
+        free_text = (
+            "yes"
+            if usage_record.get(
+                "free_model"
+            )
+            else "no"
+        )
+
         return (
             "Aether: Cloud Response\n\n"
             f"Provider: {provider_name}\n"
-            f"Model: {model}\n\n"
-            f"{response}"
+            f"Model: {model}\n"
+            f"Free model: {free_text}\n\n"
+            f"{response}\n\n"
+            "--- Cloud Usage ---\n"
+            f"Prompt tokens: "
+            f"{usage_record.get('prompt_tokens')}\n"
+            f"Completion tokens: "
+            f"{usage_record.get('completion_tokens')}\n"
+            f"Total tokens: "
+            f"{usage_record.get('total_tokens')}\n"
+            f"Session requests: "
+            f"{self.usage_tracker.status().get('request_count')}"
         )
 
     # ---------------------------------
@@ -680,15 +747,20 @@ class CloudSideModeSkill:
             else "none"
         )
 
+        guard = (
+            self.request_guard
+            .status()
+        )
+
+        usage = (
+            self.usage_tracker
+            .status()
+        )
+
         execution_state = (
             "enabled"
             if self.cloud_execution_enabled
             else "locked"
-        )
-
-        guard = (
-            self.request_guard
-            .status()
         )
 
         return (
@@ -699,16 +771,19 @@ class CloudSideModeSkill:
             "Privacy gate: active\n"
             "Permission gate: active\n"
             "Request guard: active\n"
+            "Usage visibility: active\n"
             f"Cloud requests used: "
             f"{guard.get('current_requests')}/"
             f"{guard.get('max_requests')} "
             f"in {guard.get('window_seconds')} seconds\n"
+            f"Session cloud requests: "
+            f"{usage.get('request_count')}\n"
             f"Configured providers: {provider_text}\n"
             f"Cloud execution: {execution_state}"
         )
 
     # ---------------------------------
-    # GUARD STATUS
+    # GUARD
     # ---------------------------------
 
     def _show_guard(
@@ -740,6 +815,71 @@ class CloudSideModeSkill:
             f"{allowed}\n"
             f"Retry after: "
             f"{guard.get('retry_after_seconds')} seconds"
+        )
+
+    # ---------------------------------
+    # USAGE
+    # ---------------------------------
+
+    def _show_usage(
+        self
+    ):
+
+        usage = (
+            self.usage_tracker
+            .status()
+        )
+
+        last = (
+            usage.get(
+                "last_request"
+            )
+        )
+
+        output = (
+            "Aether: Cloud Usage\n\n"
+            "Session-only metadata\n"
+            "Prompts/responses are not stored "
+            "by this tracker.\n\n"
+            f"Requests: "
+            f"{usage.get('request_count')}\n"
+            f"Successful: "
+            f"{usage.get('success_count')}\n"
+            f"Failed: "
+            f"{usage.get('failure_count')}\n"
+            f"Prompt tokens: "
+            f"{usage.get('prompt_tokens')}\n"
+            f"Completion tokens: "
+            f"{usage.get('completion_tokens')}\n"
+            f"Total tokens: "
+            f"{usage.get('total_tokens')}"
+        )
+
+        if last is None:
+
+            return (
+                output
+                + "\n\nLast request: none"
+            )
+
+        free_text = (
+            "yes"
+            if last.get(
+                "free_model"
+            )
+            else "no"
+        )
+
+        return (
+            output
+            + "\n\nLast request:\n"
+            f"Provider: "
+            f"{last.get('provider')}\n"
+            f"Model: "
+            f"{last.get('model')}\n"
+            f"Free model: {free_text}\n"
+            f"Success: "
+            f"{last.get('success')}"
         )
 
     # ---------------------------------
@@ -815,6 +955,7 @@ class CloudSideModeSkill:
             "Privacy gate: active\n"
             "Permission gate: active\n"
             "Request guard: active\n"
+            "Usage visibility: active\n"
             "Cloud execution: "
             + (
                 "enabled"
