@@ -316,24 +316,31 @@ class ProviderSkill:
                 self._show_ollama_models()
             )
 
-        prefix = "ask ollama "
+        local_ai_prefixes = (
+            "ask local ",
+            "ask ollama ",
+            "use local ai ",
+            "use ollama "
+        )
 
-        if lower.startswith(
-            prefix
-        ):
+        for prefix in local_ai_prefixes:
 
-            request = (
-                message[
-                    len(prefix):
-                ]
-                .strip()
-            )
+            if lower.startswith(
+                prefix
+            ):
 
-            return (
-                self._ask_ollama(
-                    request
+                request = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
                 )
-            )
+
+                return (
+                    self._ask_ollama(
+                        request
+                    )
+                )
 
         return None
 
