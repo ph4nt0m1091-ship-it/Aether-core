@@ -14,6 +14,10 @@ from policies.cloud_usage_tracker import (
     CloudUsageTracker
 )
 
+from policies.cloud_routing_policy import (
+    CloudRoutingPolicy
+)
+
 from providers.cloud_provider_registry import (
     CloudProviderRegistry
 )
@@ -32,14 +36,15 @@ class CloudSideModeSkill:
     - rate guard
     - provider free-model guard
     - safe cloud usage visibility
+    - advisory cloud routing intelligence
     """
 
     name = "cloud_side_mode"
 
     description = (
         "Controls Aether's privacy-gated, "
-        "permission-gated and rate-limited "
-        "cloud side mode."
+        "permission-gated, rate-limited "
+        "cloud side mode and route advisor."
     )
 
     def __init__(
@@ -70,6 +75,10 @@ class CloudSideModeSkill:
 
         self.usage_tracker = (
             CloudUsageTracker()
+        )
+
+        self.routing_policy = (
+            CloudRoutingPolicy()
         )
 
         self.last_evaluation = None
@@ -136,6 +145,44 @@ class CloudSideModeSkill:
                 "permission.\n"
                 'Say "yes" to approve or '
                 '"no" to cancel.'
+            )
+
+        # ---------------------------------
+        # ROUTE ADVISOR
+        # ---------------------------------
+
+        route_prefixes = (
+            "cloud route ",
+            "route cloud ",
+            "cloud routing "
+        )
+
+        route_prefix = None
+
+        for prefix in route_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                route_prefix = prefix
+                break
+
+        if route_prefix is not None:
+
+            request = (
+                message[
+                    len(
+                        route_prefix
+                    ):
+                ]
+                .strip()
+            )
+
+            return (
+                self._show_route(
+                    request
+                )
             )
 
         # ---------------------------------
@@ -218,6 +265,7 @@ class CloudSideModeSkill:
                 "Permission gate: active\n"
                 "Request guard: active\n"
                 "Usage visibility: active\n"
+                "Route advisor: active\n"
                 "Cloud execution: enabled"
             )
 
@@ -301,6 +349,148 @@ class CloudSideModeSkill:
                 request,
                 evaluation
             )
+        )
+
+    # ---------------------------------
+    # ROUTE ADVISOR
+    # ---------------------------------
+
+    def _show_route(
+        self,
+        request
+    ):
+
+        if not request:
+
+            return (
+                "Aether: What request would you "
+                "like me to evaluate for routing?"
+            )
+
+        decision = (
+            self.routing_policy
+            .decide(
+                request
+            )
+        )
+
+        route = str(
+            decision.get(
+                "route",
+                "local"
+            )
+        ).strip()
+
+        reason = str(
+            decision.get(
+                "reason",
+                "unknown"
+            )
+        ).strip()
+
+        explicit_cloud = bool(
+            decision.get(
+                "explicit_cloud"
+            )
+        )
+
+        explicit_local = bool(
+            decision.get(
+                "explicit_local"
+            )
+        )
+
+        cloud_authorized = bool(
+            decision.get(
+                "cloud_authorized"
+            )
+        )
+
+        labels = {
+            "local": "LOCAL",
+            "cloud": "CLOUD PATH",
+            "suggest_cloud": (
+                "SUGGEST CLOUD"
+            ),
+            "block_cloud": (
+                "BLOCK CLOUD"
+            )
+        }
+
+        route_label = (
+            labels.get(
+                route,
+                route.upper()
+            )
+        )
+
+        reason_labels = {
+            "local_default": (
+                "local is the default"
+            ),
+            "explicit_local_request": (
+                "you explicitly requested local use"
+            ),
+            "explicit_cloud_request": (
+                "you explicitly requested cloud use"
+            ),
+            "cloud_may_be_helpful": (
+                "cloud may be useful for this task"
+            ),
+            "possible_secret_or_credential": (
+                "the request may contain a secret "
+                "or credential"
+            ),
+            "possible_private_or_local_context": (
+                "the request may involve private "
+                "or local context"
+            ),
+            "empty_request": (
+                "no request was provided"
+            )
+        }
+
+        reason_text = (
+            reason_labels.get(
+                reason,
+                reason
+            )
+        )
+
+        authorized_text = (
+            "yes"
+            if cloud_authorized
+            else "no"
+        )
+
+        explicit_cloud_text = (
+            "yes"
+            if explicit_cloud
+            else "no"
+        )
+
+        explicit_local_text = (
+            "yes"
+            if explicit_local
+            else "no"
+        )
+
+        return (
+            "Aether: Route Recommendation\n\n"
+            f"Request:\n{request}\n\n"
+            f"Recommended route: "
+            f"{route_label}\n"
+            f"Reason: {reason_text}\n\n"
+            f"Explicit cloud request: "
+            f"{explicit_cloud_text}\n"
+            f"Explicit local request: "
+            f"{explicit_local_text}\n"
+            f"Cloud authorized: "
+            f"{authorized_text}\n\n"
+            "Action taken: none\n\n"
+            "The route advisor only recommends "
+            "where a request belongs. "
+            "It does not execute anything."
         )
 
     # ---------------------------------
@@ -772,6 +962,7 @@ class CloudSideModeSkill:
             "Permission gate: active\n"
             "Request guard: active\n"
             "Usage visibility: active\n"
+            "Route advisor: active\n"
             f"Cloud requests used: "
             f"{guard.get('current_requests')}/"
             f"{guard.get('max_requests')} "
@@ -956,6 +1147,7 @@ class CloudSideModeSkill:
             "Permission gate: active\n"
             "Request guard: active\n"
             "Usage visibility: active\n"
+            "Route advisor: active\n"
             "Cloud execution: "
             + (
                 "enabled"
