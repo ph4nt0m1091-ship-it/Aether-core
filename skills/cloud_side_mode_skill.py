@@ -35,26 +35,25 @@ class CloudSideModeSkill:
     """
     Aether Cloud Side Mode.
 
-    Safety stack:
+    Safety and intelligence stack:
     - local by default
     - explicit cloud requests only
     - privacy gate
-    - configured provider requirement
     - user permission gate
+    - free-model guard
     - rate guard
-    - provider free-model guard
-    - safe cloud usage visibility
-    - advisory cloud routing intelligence
-    - local versus cloud advisor
-    - dynamic local Ollama model discovery
+    - safe usage visibility
+    - advisory cloud routing
+    - live Ollama model discovery
+    - Local vs Cloud Decision Engine v2
     """
 
     name = "cloud_side_mode"
 
     description = (
         "Controls Aether's privacy-gated, "
-        "permission-gated, rate-limited "
-        "cloud side mode and routing advisors."
+        "permission-gated cloud side mode "
+        "and local-versus-cloud intelligence."
     )
 
     def __init__(
@@ -100,7 +99,6 @@ class CloudSideModeSkill:
         )
 
         self.last_evaluation = None
-
         self.last_cloud_result = None
 
         self.cloud_execution_enabled = True
@@ -176,46 +174,35 @@ class CloudSideModeSkill:
             "cloud routing "
         )
 
-        route_prefix = None
-
         for prefix in route_prefixes:
 
             if lower.startswith(
                 prefix
             ):
 
-                route_prefix = prefix
-
-                break
-
-        if route_prefix is not None:
-
-            request = (
-                message[
-                    len(
-                        route_prefix
-                    ):
-                ]
-                .strip()
-            )
-
-            return (
-                self._show_route(
-                    request
+                request = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
                 )
-            )
+
+                return (
+                    self._show_route(
+                        request
+                    )
+                )
 
         # ---------------------------------
-        # LOCAL VS CLOUD ADVISOR
+        # LOCAL VS CLOUD DECISION ENGINE
         # ---------------------------------
 
         compare_prefixes = (
             "compare route ",
             "local vs cloud ",
-            "compare local cloud "
+            "compare local cloud ",
+            "decide route "
         )
-
-        compare_prefix = None
 
         for prefix in compare_prefixes:
 
@@ -223,26 +210,18 @@ class CloudSideModeSkill:
                 prefix
             ):
 
-                compare_prefix = prefix
-
-                break
-
-        if compare_prefix is not None:
-
-            request = (
-                message[
-                    len(
-                        compare_prefix
-                    ):
-                ]
-                .strip()
-            )
-
-            return (
-                self._show_local_cloud_advice(
-                    request
+                request = (
+                    message[
+                        len(prefix):
+                    ]
+                    .strip()
                 )
-            )
+
+                return (
+                    self._show_local_cloud_advice(
+                        request
+                    )
+                )
 
         # ---------------------------------
         # LOCAL MODELS
@@ -290,7 +269,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # GUARD
+        # REQUEST GUARD
         # ---------------------------------
 
         if lower in (
@@ -318,7 +297,7 @@ class CloudSideModeSkill:
             )
 
         # ---------------------------------
-        # ENABLE CLOUD SIDE MODE
+        # ENABLE CLOUD MODE
         # ---------------------------------
 
         if lower in (
@@ -337,10 +316,11 @@ class CloudSideModeSkill:
                 "requested.\n\n"
                 "Privacy gate: active\n"
                 "Permission gate: active\n"
+                "Free-model guard: active\n"
                 "Request guard: active\n"
                 "Usage visibility: active\n"
                 "Route advisor: active\n"
-                "Local vs cloud advisor: active\n"
+                "Decision Engine v2: active\n"
                 "Dynamic local model discovery: active\n"
                 "Cloud execution: enabled"
             )
@@ -383,10 +363,7 @@ class CloudSideModeSkill:
                 prefix
             ):
 
-                matched_prefix = (
-                    prefix
-                )
-
+                matched_prefix = prefix
                 break
 
         if matched_prefix is None:
@@ -451,7 +428,8 @@ class CloudSideModeSkill:
                 "success": False,
                 "models": [],
                 "error": (
-                    "Ollama returned an invalid response."
+                    "Ollama returned an "
+                    "invalid response."
                 )
             }
 
@@ -465,23 +443,20 @@ class CloudSideModeSkill:
                 "error": (
                     result.get(
                         "error",
-                        "Unable to discover Ollama models."
+                        "Unable to discover "
+                        "Ollama models."
                     )
                 )
             }
-
-        models = (
-            result.get(
-                "models",
-                []
-            )
-        )
 
         models = [
             str(
                 model
             ).strip()
-            for model in models
+            for model in result.get(
+                "models",
+                []
+            )
             if str(
                 model
             ).strip()
@@ -528,8 +503,8 @@ class CloudSideModeSkill:
 
             return (
                 "Aether: Local Model Discovery\n\n"
-                "Ollama is reachable, but no local "
-                "models were found.\n\n"
+                "Ollama is reachable, but no "
+                "local models were found.\n\n"
                 "Nothing was executed."
             )
 
@@ -590,24 +565,6 @@ class CloudSideModeSkill:
             )
         ).strip()
 
-        explicit_cloud = bool(
-            decision.get(
-                "explicit_cloud"
-            )
-        )
-
-        explicit_local = bool(
-            decision.get(
-                "explicit_local"
-            )
-        )
-
-        cloud_authorized = bool(
-            decision.get(
-                "cloud_authorized"
-            )
-        )
-
         labels = {
             "local": "LOCAL",
             "cloud": "CLOUD PATH",
@@ -618,13 +575,6 @@ class CloudSideModeSkill:
                 "BLOCK CLOUD"
             )
         }
-
-        route_label = (
-            labels.get(
-                route,
-                route.upper()
-            )
-        )
 
         reason_labels = {
             "local_default": (
@@ -652,6 +602,13 @@ class CloudSideModeSkill:
             )
         }
 
+        route_label = (
+            labels.get(
+                route,
+                route.upper()
+            )
+        )
+
         reason_text = (
             reason_labels.get(
                 reason,
@@ -659,21 +616,27 @@ class CloudSideModeSkill:
             )
         )
 
-        authorized_text = (
+        explicit_cloud = (
             "yes"
-            if cloud_authorized
+            if decision.get(
+                "explicit_cloud"
+            )
             else "no"
         )
 
-        explicit_cloud_text = (
+        explicit_local = (
             "yes"
-            if explicit_cloud
+            if decision.get(
+                "explicit_local"
+            )
             else "no"
         )
 
-        explicit_local_text = (
+        cloud_authorized = (
             "yes"
-            if explicit_local
+            if decision.get(
+                "cloud_authorized"
+            )
             else "no"
         )
 
@@ -684,19 +647,18 @@ class CloudSideModeSkill:
             f"{route_label}\n"
             f"Reason: {reason_text}\n\n"
             f"Explicit cloud request: "
-            f"{explicit_cloud_text}\n"
+            f"{explicit_cloud}\n"
             f"Explicit local request: "
-            f"{explicit_local_text}\n"
+            f"{explicit_local}\n"
             f"Cloud authorized: "
-            f"{authorized_text}\n\n"
+            f"{cloud_authorized}\n\n"
             "Action taken: none\n\n"
             "The route advisor only recommends "
-            "where a request belongs. "
-            "It does not execute anything."
+            "where a request belongs."
         )
 
     # ---------------------------------
-    # LOCAL VS CLOUD ADVISOR
+    # LOCAL VS CLOUD DECISION ENGINE
     # ---------------------------------
 
     def _show_local_cloud_advice(
@@ -736,8 +698,8 @@ class CloudSideModeSkill:
 
         recommendation = str(
             advice.get(
-                "recommendation",
-                "local"
+                "recommendation_label",
+                "LOCAL"
             )
         ).strip()
 
@@ -747,6 +709,13 @@ class CloudSideModeSkill:
                 "unknown"
             )
         ).strip()
+
+        complexity = (
+            advice.get(
+                "complexity_score",
+                0
+            )
+        )
 
         local = (
             advice.get(
@@ -762,18 +731,10 @@ class CloudSideModeSkill:
             )
         )
 
-        labels = {
-            "local": "LOCAL",
-            "cloud": "CLOUD",
-            "cloud_may_help": (
-                "CLOUD MAY HELP"
-            )
-        }
-
-        recommendation_label = (
-            labels.get(
-                recommendation,
-                recommendation.upper()
+        fallback = (
+            advice.get(
+                "fallback",
+                {}
             )
         )
 
@@ -781,14 +742,6 @@ class CloudSideModeSkill:
             "yes"
             if local.get(
                 "available"
-            )
-            else "no"
-        )
-
-        local_private = (
-            "yes"
-            if local.get(
-                "private"
             )
             else "no"
         )
@@ -809,6 +762,21 @@ class CloudSideModeSkill:
             else "no"
         )
 
+        models = (
+            local.get(
+                "installed_models",
+                []
+            )
+        )
+
+        installed_text = (
+            ", ".join(
+                models
+            )
+            if models
+            else "none detected"
+        )
+
         discovery_text = (
             "live Ollama discovery"
             if discovery.get(
@@ -817,40 +785,46 @@ class CloudSideModeSkill:
             else "Ollama discovery unavailable"
         )
 
-        installed_text = (
-            ", ".join(
-                installed_models
-            )
-            if installed_models
-            else "none detected"
-        )
-
         return (
-            "Aether: Local vs Cloud Advisor\n\n"
+            "Aether: Local vs Cloud Decision Engine v2\n\n"
             f"Request:\n{request}\n\n"
-            f"Recommendation: "
-            f"{recommendation_label}\n"
-            f"Reason: {reason}\n\n"
+            f"Recommendation: {recommendation}\n"
+            f"Reason: {reason}\n"
+            f"Complexity score: {complexity}\n\n"
+
             "--- Local Option ---\n"
             f"Available: {local_available}\n"
-            f"Model: "
+            f"Recommended model: "
             f"{local.get('model')}\n"
             f"Tier: "
             f"{local.get('tier')}\n"
-            f"Private: {local_private}\n"
+            "Private: yes\n"
             "Internet required: no\n"
             f"Model source: {discovery_text}\n"
-            f"Installed models: {installed_text}\n\n"
+            f"Installed models: "
+            f"{installed_text}\n\n"
+
             "--- Cloud Option ---\n"
             f"Route: "
             f"{cloud.get('route')}\n"
+            f"Cloud benefit: "
+            f"{cloud.get('benefit')}\n"
+            f"Why: "
+            f"{cloud.get('benefit_reason')}\n"
             f"Permission required: "
             f"{cloud_permission}\n"
             f"Cloud authorized: "
             f"{cloud_authorized}\n"
             "Internet required: yes\n\n"
+
+            "--- Fallback ---\n"
+            f"Local model: "
+            f"{fallback.get('local_model')}\n"
+            f"Local tier: "
+            f"{fallback.get('local_tier')}\n\n"
+
             "Action taken: none\n\n"
-            "This comparison is advisory only."
+            "Decision Engine v2 is advisory only."
         )
 
     # ---------------------------------
@@ -971,6 +945,7 @@ class CloudSideModeSkill:
             "This prompt would leave your computer "
             "and be processed by an external cloud "
             "provider.\n\n"
+            "Free-model guard: active\n"
             "Cloud request guard: active\n"
             "Cloud execution: enabled\n\n"
             'Say "yes" to approve or '
@@ -1113,10 +1088,6 @@ class CloudSideModeSkill:
                 "Nothing was sent."
             )
 
-        # ---------------------------------
-        # INTERNET BOUNDARY
-        # ---------------------------------
-
         result = (
             provider.execute(
                 capability,
@@ -1170,8 +1141,7 @@ class CloudSideModeSkill:
         )
 
         usage_record = (
-            self.usage_tracker
-            .record(
+            self.usage_tracker.record(
                 provider=provider_name,
                 model=model,
                 usage=usage,
@@ -1284,27 +1254,25 @@ class CloudSideModeSkill:
             .configured()
         )
 
-        configured_names = [
+        provider_names = [
             provider.name
             for provider in configured
         ]
 
         provider_text = (
             ", ".join(
-                configured_names
+                provider_names
             )
-            if configured_names
+            if provider_names
             else "none"
         )
 
         guard = (
-            self.request_guard
-            .status()
+            self.request_guard.status()
         )
 
         usage = (
-            self.usage_tracker
-            .status()
+            self.usage_tracker.status()
         )
 
         execution_state = (
@@ -1320,10 +1288,11 @@ class CloudSideModeSkill:
             "Cloud requests: explicit only\n"
             "Privacy gate: active\n"
             "Permission gate: active\n"
+            "Free-model guard: active\n"
             "Request guard: active\n"
             "Usage visibility: active\n"
             "Route advisor: active\n"
-            "Local vs cloud advisor: active\n"
+            "Decision Engine v2: active\n"
             "Dynamic local model discovery: active\n"
             f"Cloud requests used: "
             f"{guard.get('current_requests')}/"
@@ -1331,8 +1300,10 @@ class CloudSideModeSkill:
             f"in {guard.get('window_seconds')} seconds\n"
             f"Session cloud requests: "
             f"{usage.get('request_count')}\n"
-            f"Configured providers: {provider_text}\n"
-            f"Cloud execution: {execution_state}"
+            f"Configured providers: "
+            f"{provider_text}\n"
+            f"Cloud execution: "
+            f"{execution_state}"
         )
 
     # ---------------------------------
@@ -1344,8 +1315,7 @@ class CloudSideModeSkill:
     ):
 
         guard = (
-            self.request_guard
-            .status()
+            self.request_guard.status()
         )
 
         allowed = (
@@ -1379,8 +1349,7 @@ class CloudSideModeSkill:
     ):
 
         usage = (
-            self.usage_tracker
-            .status()
+            self.usage_tracker.status()
         )
 
         last = (
@@ -1430,7 +1399,8 @@ class CloudSideModeSkill:
             f"{last.get('provider')}\n"
             f"Model: "
             f"{last.get('model')}\n"
-            f"Free model: {free_text}\n"
+            f"Free model: "
+            f"{free_text}\n"
             f"Success: "
             f"{last.get('success')}"
         )
@@ -1444,8 +1414,7 @@ class CloudSideModeSkill:
     ):
 
         providers = (
-            self.providers
-            .info()
+            self.providers.info()
         )
 
         if not providers:
@@ -1496,8 +1465,10 @@ class CloudSideModeSkill:
                 f"- {provider.get('name')}\n"
                 f"  Type: "
                 f"{provider.get('type')}\n"
-                f"  Configured: {configured}\n"
-                f"  Available: {available}\n"
+                f"  Configured: "
+                f"{configured}\n"
+                f"  Available: "
+                f"{available}\n"
                 f"  Capabilities: "
                 f"{capability_text}\n"
                 f"  Description: "
@@ -1507,10 +1478,11 @@ class CloudSideModeSkill:
         output += (
             "Privacy gate: active\n"
             "Permission gate: active\n"
+            "Free-model guard: active\n"
             "Request guard: active\n"
             "Usage visibility: active\n"
             "Route advisor: active\n"
-            "Local vs cloud advisor: active\n"
+            "Decision Engine v2: active\n"
             "Dynamic local model discovery: active\n"
             "Cloud execution: "
             + (
@@ -1533,8 +1505,7 @@ class CloudSideModeSkill:
     ):
 
         return (
-            self.permissions
-            .has_pending()
+            self.permissions.has_pending()
         )
 
     def cancel_pending_permission(
@@ -1542,8 +1513,7 @@ class CloudSideModeSkill:
     ):
 
         if not (
-            self.permissions
-            .has_pending()
+            self.permissions.has_pending()
         ):
 
             return False
