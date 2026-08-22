@@ -18,6 +18,10 @@ from policies.cloud_routing_policy import (
     CloudRoutingPolicy
 )
 
+from policies.local_cloud_advisor import (
+    LocalCloudAdvisor
+)
+
 from providers.cloud_provider_registry import (
     CloudProviderRegistry
 )
@@ -37,6 +41,7 @@ class CloudSideModeSkill:
     - provider free-model guard
     - safe cloud usage visibility
     - advisory cloud routing intelligence
+    - local versus cloud advisor
     """
 
     name = "cloud_side_mode"
@@ -44,7 +49,7 @@ class CloudSideModeSkill:
     description = (
         "Controls Aether's privacy-gated, "
         "permission-gated, rate-limited "
-        "cloud side mode and route advisor."
+        "cloud side mode and routing advisors."
     )
 
     def __init__(
@@ -81,7 +86,12 @@ class CloudSideModeSkill:
             CloudRoutingPolicy()
         )
 
+        self.local_cloud_advisor = (
+            LocalCloudAdvisor()
+        )
+
         self.last_evaluation = None
+
         self.last_cloud_result = None
 
         self.cloud_execution_enabled = True
@@ -166,6 +176,7 @@ class CloudSideModeSkill:
             ):
 
                 route_prefix = prefix
+
                 break
 
         if route_prefix is not None:
@@ -181,6 +192,45 @@ class CloudSideModeSkill:
 
             return (
                 self._show_route(
+                    request
+                )
+            )
+
+        # ---------------------------------
+        # LOCAL VS CLOUD ADVISOR
+        # ---------------------------------
+
+        compare_prefixes = (
+            "compare route ",
+            "local vs cloud ",
+            "compare local cloud "
+        )
+
+        compare_prefix = None
+
+        for prefix in compare_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                compare_prefix = prefix
+
+                break
+
+        if compare_prefix is not None:
+
+            request = (
+                message[
+                    len(
+                        compare_prefix
+                    ):
+                ]
+                .strip()
+            )
+
+            return (
+                self._show_local_cloud_advice(
                     request
                 )
             )
@@ -266,6 +316,7 @@ class CloudSideModeSkill:
                 "Request guard: active\n"
                 "Usage visibility: active\n"
                 "Route advisor: active\n"
+                "Local vs cloud advisor: active\n"
                 "Cloud execution: enabled"
             )
 
@@ -491,6 +542,141 @@ class CloudSideModeSkill:
             "The route advisor only recommends "
             "where a request belongs. "
             "It does not execute anything."
+        )
+
+    # ---------------------------------
+    # LOCAL VS CLOUD ADVISOR
+    # ---------------------------------
+
+    def _show_local_cloud_advice(
+        self,
+        request
+    ):
+
+        if not request:
+
+            return (
+                "Aether: What request would you "
+                "like me to compare?"
+            )
+
+        # These are Aether's known local model
+        # choices for Advisor v1.
+        #
+        # No model is executed here.
+        installed_models = [
+            "gemma3:1b",
+            "qwen3:4b",
+            "qwen3:8b"
+        ]
+
+        advice = (
+            self.local_cloud_advisor
+            .advise(
+                request,
+                installed_models
+            )
+        )
+
+        recommendation = str(
+            advice.get(
+                "recommendation",
+                "local"
+            )
+        ).strip()
+
+        reason = str(
+            advice.get(
+                "reason",
+                "unknown"
+            )
+        ).strip()
+
+        local = (
+            advice.get(
+                "local",
+                {}
+            )
+        )
+
+        cloud = (
+            advice.get(
+                "cloud",
+                {}
+            )
+        )
+
+        labels = {
+            "local": "LOCAL",
+            "cloud": "CLOUD",
+            "cloud_may_help": (
+                "CLOUD MAY HELP"
+            )
+        }
+
+        recommendation_label = (
+            labels.get(
+                recommendation,
+                recommendation.upper()
+            )
+        )
+
+        local_available = (
+            "yes"
+            if local.get(
+                "available"
+            )
+            else "no"
+        )
+
+        local_private = (
+            "yes"
+            if local.get(
+                "private"
+            )
+            else "no"
+        )
+
+        cloud_permission = (
+            "yes"
+            if cloud.get(
+                "requires_permission"
+            )
+            else "no"
+        )
+
+        cloud_authorized = (
+            "yes"
+            if cloud.get(
+                "authorized"
+            )
+            else "no"
+        )
+
+        return (
+            "Aether: Local vs Cloud Advisor\n\n"
+            f"Request:\n{request}\n\n"
+            f"Recommendation: "
+            f"{recommendation_label}\n"
+            f"Reason: {reason}\n\n"
+            "--- Local Option ---\n"
+            f"Available: {local_available}\n"
+            f"Model: "
+            f"{local.get('model')}\n"
+            f"Tier: "
+            f"{local.get('tier')}\n"
+            f"Private: {local_private}\n"
+            "Internet required: no\n\n"
+            "--- Cloud Option ---\n"
+            f"Route: "
+            f"{cloud.get('route')}\n"
+            f"Permission required: "
+            f"{cloud_permission}\n"
+            f"Cloud authorized: "
+            f"{cloud_authorized}\n"
+            "Internet required: yes\n\n"
+            "Action taken: none\n\n"
+            "This comparison is advisory only."
         )
 
     # ---------------------------------
@@ -963,6 +1149,7 @@ class CloudSideModeSkill:
             "Request guard: active\n"
             "Usage visibility: active\n"
             "Route advisor: active\n"
+            "Local vs cloud advisor: active\n"
             f"Cloud requests used: "
             f"{guard.get('current_requests')}/"
             f"{guard.get('max_requests')} "
@@ -1148,6 +1335,7 @@ class CloudSideModeSkill:
             "Request guard: active\n"
             "Usage visibility: active\n"
             "Route advisor: active\n"
+            "Local vs cloud advisor: active\n"
             "Cloud execution: "
             + (
                 "enabled"
