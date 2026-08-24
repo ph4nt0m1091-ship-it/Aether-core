@@ -415,7 +415,154 @@ class Brain:
             return response
 
         # ---------------------------------
-        # UNKNOWN COMMAND
+        # NATURAL LOCAL EXECUTION
+        # ---------------------------------
+        #
+        # Every existing command, workflow, and skill
+        # has already had first chance to handle the
+        # request before this point.
+        #
+        # Unhandled conversational requests fall back
+        # to local Ollama only.
+        #
+        # This path never routes to cloud.
+
+        local_request = (
+            message
+        )
+
+        lower_message = (
+            message.lower()
+        )
+
+        # ---------------------------------
+        # NATURAL RESPONSE STYLE
+        # ---------------------------------
+
+        brief_markers = (
+            "briefly",
+            "brief explanation",
+            "short answer",
+            "short explanation",
+            "keep it short",
+            "keep it brief",
+            "be concise",
+            "concisely"
+        )
+
+        detailed_markers = (
+            "in detail",
+            "detailed explanation",
+            "explain thoroughly",
+            "thorough explanation",
+            "deep explanation",
+            "go in depth",
+            "in-depth",
+            "in depth"
+        )
+
+        response_style = None
+
+        if any(
+            item in lower_message
+            for item in brief_markers
+        ):
+
+            response_style = "brief"
+
+        elif any(
+            item in lower_message
+            for item in detailed_markers
+        ):
+
+            response_style = "detailed"
+
+        if response_style:
+
+            local_request = (
+                response_style
+                + " "
+                + local_request
+            )
+
+        # ---------------------------------
+        # OPERATIONAL INPUT SAFETY
+        # ---------------------------------
+
+        reserved_prefixes = (
+            "git ",
+            "python ",
+            "pip ",
+            "powershell ",
+            "cmd ",
+            "terminal ",
+            "run command ",
+            "execute command ",
+            "delete ",
+            "remove file ",
+            "move file ",
+            "rename file ",
+            "schedule ",
+            "cancel task ",
+            "stop runtime ",
+            "start runtime ",
+            "restart runtime "
+        )
+
+        if lower_message.startswith(
+            reserved_prefixes
+        ):
+
+            return (
+                "Aether: I couldn't match that "
+                "to a registered operational command.\n\n"
+                "Nothing was executed."
+            )
+
+        # ---------------------------------
+        # CLOUD BOUNDARY
+        # ---------------------------------
+
+        cloud_prefixes = (
+            "ask cloud",
+            "ask the cloud",
+            "send to cloud",
+            "use cloud for"
+        )
+
+        if lower_message.startswith(
+            cloud_prefixes
+        ):
+
+            return (
+                "Aether: I couldn't complete that "
+                "through the cloud command handler.\n\n"
+                "Nothing was sent."
+            )
+
+        # ---------------------------------
+        # LOCAL CONVERSATIONAL FALLBACK
+        # ---------------------------------
+
+        provider_skill = (
+            self.skill_manager
+            .registry
+            .provider_skill
+        )
+
+        local_response = (
+            provider_skill.handle(
+                "ask local "
+                + local_request
+            )
+        )
+
+        if local_response is not None:
+
+            return local_response
+
+        # ---------------------------------
+        # FINAL FALLBACK
         # ---------------------------------
 
         return (

@@ -1780,11 +1780,20 @@ class ProviderSkill:
             "we are asked",
             "we are given the instruction",
             "we are given an instruction",
+            "we are comparing",
+            "we need to",
             "i need to focus",
             "i need to be",
+            "i'll choose",
+            "i will choose",
+            "let's pick",
+            "let me write",
+            "however, note",
             "wait, they",
             "the user asked me to",
-            "the user wants me to"
+            "the user wants me to",
+            "the user didn't specify",
+            "the user did not specify"
         )
 
         for phrase in strong_starts:
@@ -1798,11 +1807,20 @@ class ProviderSkill:
         meta_markers = (
             "the user wants",
             "the user asked",
+            "the user didn't specify",
+            "the user did not specify",
             "we must answer",
+            "we need to answer",
+            "i must answer",
             "i need to answer",
             "i need to focus",
+            "i'll choose",
+            "i will choose",
+            "let's pick",
             "let me write",
             "let me answer",
+            "i will write",
+            "the answer must",
             "return only the answer",
             "do not describe your reasoning",
             "do not describe my reasoning",
@@ -1811,6 +1829,7 @@ class ProviderSkill:
             "how we are answering",
             "how i'm answering",
             "the instruction says",
+            "however, note",
             "they specifically asked",
             "they emphasized"
         )
