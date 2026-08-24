@@ -1,49 +1,64 @@
-class ModelRouter:
+﻿class ModelRouter:
     """
     Chooses the best local model for an Aether task.
 
     Strategy:
-    - gemma3:1b = fast/default brain
-    - qwen3:4b = deeper reasoning
+    - gemma3:1b = fast/default conversational brain
+    - qwen3:4b = analysis and deeper reasoning
     - qwen3:8b = explicit heavy model only
 
-    The router favors speed unless the request
-    appears to require more reasoning.
+    Normal requests favor speed.
+    More demanding requests earn complexity points.
     """
 
     FAST_MODEL = "gemma3:1b"
-
     SMART_MODEL = "qwen3:4b"
-
     HEAVY_MODEL = "qwen3:8b"
 
-    COMPLEX_KEYWORDS = (
+    # Strong signals are enough by themselves
+    # to justify the smart model.
+    STRONG_COMPLEXITY_SIGNALS = (
         "analyze",
         "analysis",
         "compare",
-        "reason",
-        "reasoning",
-        "architecture",
-        "debug",
-        "diagnose",
-        "design",
-        "security",
-        "vulnerability",
-        "weakness",
-        "strategy",
-        "plan",
-        "complex",
-        "deeply",
-        "detailed",
         "evaluate",
+        "diagnose",
+        "debug",
+        "architecture",
         "tradeoff",
         "tradeoffs",
         "pros and cons",
+        "root cause",
+        "security review",
+        "vulnerability",
+        "design a system",
+        "design an architecture",
+        "strategy"
+    )
+
+    # Supporting signals add complexity but do
+    # not necessarily require Qwen on their own.
+    SUPPORTING_COMPLEXITY_SIGNALS = (
         "explain why",
+        "reason",
+        "reasoning",
+        "weakness",
+        "complex",
+        "deeply",
+        "detailed",
         "figure out",
         "solve",
         "code",
-        "programming"
+        "programming",
+        "step by step",
+        "advantages and disadvantages"
+    )
+
+    # Kept for compatibility with other Aether
+    # components that inspect this attribute.
+    COMPLEX_KEYWORDS = (
+        STRONG_COMPLEXITY_SIGNALS
+        + SUPPORTING_COMPLEXITY_SIGNALS
     )
 
     def choose(
@@ -52,6 +67,10 @@ class ModelRouter:
         installed_models,
         requested_model=None
     ):
+
+        prompt = str(
+            prompt or ""
+        )
 
         installed = set(
             installed_models
@@ -78,7 +97,9 @@ class ModelRouter:
                 )
             }
 
-        lower = prompt.lower()
+        lower = (
+            prompt.lower()
+        )
 
         # ---------------------------------
         # COMPLEXITY SCORE
@@ -86,19 +107,29 @@ class ModelRouter:
 
         score = 0
 
-        for keyword in self.COMPLEX_KEYWORDS:
+        for signal in (
+            self.STRONG_COMPLEXITY_SIGNALS
+        ):
 
-            if keyword in lower:
+            if signal in lower:
+
+                score += 2
+
+        for signal in (
+            self.SUPPORTING_COMPLEXITY_SIGNALS
+        ):
+
+            if signal in lower:
 
                 score += 1
 
-        if len(prompt) > 500:
+        if len(prompt) > 600:
 
             score += 1
 
-        if len(prompt) > 1500:
+        if len(prompt) > 1400:
 
-            score += 2
+            score += 1
 
         # ---------------------------------
         # SELECT MODEL
@@ -109,19 +140,27 @@ class ModelRouter:
             and self.SMART_MODEL in installed
         ):
 
-            model = self.SMART_MODEL
+            model = (
+                self.SMART_MODEL
+            )
 
         elif self.FAST_MODEL in installed:
 
-            model = self.FAST_MODEL
+            model = (
+                self.FAST_MODEL
+            )
 
         elif self.SMART_MODEL in installed:
 
-            model = self.SMART_MODEL
+            model = (
+                self.SMART_MODEL
+            )
 
         elif installed_models:
 
-            model = installed_models[0]
+            model = (
+                installed_models[0]
+            )
 
         else:
 
@@ -156,16 +195,24 @@ class ModelRouter:
             return {
                 "success": True,
                 "model": model,
-                "prompt": prompt,
+                "prompt": (
+                    "Answer naturally and directly. "
+                    "Start with the useful answer instead "
+                    "of filler such as 'Okay' or "
+                    "'Let's break this down'. "
+                    "Be concise unless the request asks "
+                    "for more detail.\n\n"
+                    + prompt
+                ),
                 "think": False,
                 "num_ctx": 2048,
-                "num_predict": 120,
+                "num_predict": 140,
                 "keep_alive": "30m",
                 "tier": "fast"
             }
 
         # ---------------------------------
-        # SMART QWEN
+        # SMART MODEL
         # ---------------------------------
 
         if model == self.SMART_MODEL:
@@ -174,21 +221,23 @@ class ModelRouter:
                 "success": True,
                 "model": model,
                 "prompt": (
-                    "Answer the request directly. "
-                    "Do not describe your reasoning process, "
-                    "do not restate the request, and do not "
-                    "talk about how you are answering.\n\n"
+                    "Give only the final user-facing "
+                    "answer. Start immediately with the "
+                    "useful content. Do not include "
+                    "planning, meta-commentary, or notes "
+                    "about how the answer is being "
+                    "constructed.\n\n"
                     + prompt
                 ),
                 "think": False,
                 "num_ctx": 2048,
-                "num_predict": 180,
+                "num_predict": 200,
                 "keep_alive": "30m",
                 "tier": "smart"
             }
 
         # ---------------------------------
-        # HEAVY QWEN
+        # HEAVY MODEL
         # ---------------------------------
 
         if model == self.HEAVY_MODEL:
@@ -197,18 +246,20 @@ class ModelRouter:
                 "success": True,
                 "model": model,
                 "prompt": (
-                    "/no_think\n"
+                    "Give only the final user-facing "
+                    "answer. Do not include planning "
+                    "or meta-commentary.\n\n"
                     + prompt
                 ),
                 "think": False,
                 "num_ctx": 2048,
-                "num_predict": 220,
+                "num_predict": 240,
                 "keep_alive": "30m",
                 "tier": "heavy"
             }
 
         # ---------------------------------
-        # UNKNOWN MODEL
+        # UNKNOWN / CUSTOM MODEL
         # ---------------------------------
 
         return {
@@ -217,7 +268,7 @@ class ModelRouter:
             "prompt": prompt,
             "think": False,
             "num_ctx": 2048,
-            "num_predict": 120,
+            "num_predict": 140,
             "keep_alive": "30m",
             "tier": "custom"
         }
