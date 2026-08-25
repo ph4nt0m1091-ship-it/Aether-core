@@ -34,6 +34,7 @@ class ProviderSkill:
 
     Supports:
     - Native providers
+    - Natural local-system actions
     - Local-system providers
     - Ollama models
     - External-agent discovery
@@ -214,6 +215,20 @@ class ProviderSkill:
             )
 
         # ---------------------------------
+        # NATURAL LOCAL ACTIONS
+        # ---------------------------------
+
+        natural_action = (
+            self._handle_natural_local_action(
+                message
+            )
+        )
+
+        if natural_action is not None:
+
+            return natural_action
+
+        # ---------------------------------
         # EXTERNAL AGENTS
         # ---------------------------------
 
@@ -343,6 +358,351 @@ class ProviderSkill:
                 )
 
         return None
+
+    # ---------------------------------
+    # NATURAL LOCAL ACTION ROUTER
+    # ---------------------------------
+
+    def _handle_natural_local_action(
+        self,
+        message
+    ):
+
+        """
+        Route a small set of clear natural-language
+        requests into Aether's existing local providers.
+
+        Natural Actions v1 intentionally allows only
+        low-risk actions here:
+        - open an approved application
+        - open an explicitly supplied existing path
+        - inspect running processes
+        - inspect local Ollama models
+
+        Natural terminal/command execution is not added
+        here. Existing command-policy and permission-aware
+        execution paths remain responsible for commands.
+        """
+
+        text = str(
+            message or ""
+        ).strip()
+
+        lower = (
+            text.lower()
+        )
+
+        if not lower:
+
+            return None
+
+        # ---------------------------------
+        # LOCAL MODEL DISCOVERY
+        # ---------------------------------
+
+        if lower in (
+            "show my local models",
+            "list my local models",
+            "show local models",
+            "list local models",
+            "what local models do i have",
+            "what models do i have locally",
+            "what models are installed locally"
+        ):
+
+            return (
+                self._show_ollama_models()
+            )
+
+        # ---------------------------------
+        # PROCESS INSPECTION
+        # ---------------------------------
+
+        if lower in (
+            "show running processes",
+            "list running processes",
+            "what processes are running",
+            "show running apps",
+            "list running apps",
+            "what is running on my computer"
+        ):
+
+            return (
+                self._show_running_processes()
+            )
+
+        # ---------------------------------
+        # EXPLICIT PATH OPENING
+        # ---------------------------------
+
+        path_prefixes = (
+            "open path ",
+            "open folder ",
+            "open file "
+        )
+
+        for prefix in path_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                raw_path = (
+                    text[
+                        len(prefix):
+                    ]
+                    .strip()
+                    .strip('"')
+                )
+
+                if not raw_path:
+
+                    return (
+                        "Aether: Tell me which path "
+                        "you want me to open."
+                    )
+
+                return (
+                    self._open_local_path(
+                        raw_path
+                    )
+                )
+
+        # ---------------------------------
+        # APPROVED APPLICATION OPENING
+        # ---------------------------------
+
+        app_prefixes = (
+            "open ",
+            "launch ",
+            "start "
+        )
+
+        provider = (
+            self.manager.get(
+                "local_system"
+            )
+        )
+
+        aliases = {}
+
+        if provider is not None:
+
+            aliases = dict(
+                getattr(
+                    provider,
+                    "APP_ALIASES",
+                    {}
+                )
+            )
+
+        for prefix in app_prefixes:
+
+            if not lower.startswith(
+                prefix
+            ):
+
+                continue
+
+            target = (
+                text[
+                    len(prefix):
+                ]
+                .strip()
+            )
+
+            target_lower = (
+                target.lower()
+            )
+
+            # Friendly natural aliases that resolve to
+            # names already approved by LocalSystemProvider.
+            friendly_aliases = {
+                "code": "vs code",
+                "windows terminal": "terminal",
+                "files": "file explorer"
+            }
+
+            target_lower = (
+                friendly_aliases.get(
+                    target_lower,
+                    target_lower
+                )
+            )
+
+            if target_lower not in aliases:
+
+                # Do not claim every phrase beginning with
+                # "open", "launch", or "start". Unknown
+                # targets remain available to other skills
+                # or normal conversational routing.
+                return None
+
+            return (
+                self._open_local_app(
+                    target_lower
+                )
+            )
+
+        return None
+
+    # ---------------------------------
+    # OPEN LOCAL APPLICATION
+    # ---------------------------------
+
+    def _open_local_app(
+        self,
+        app_name
+    ):
+
+        result = (
+            self.manager.execute(
+                "open_app",
+                {
+                    "app": app_name
+                },
+                provider_name=(
+                    "local_system"
+                )
+            )
+        )
+
+        self.last_execution_result = (
+            result
+        )
+
+        if not result.get(
+            "success"
+        ):
+
+            return (
+                "Aether: I couldn't open "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        return (
+            "Aether: Opened "
+            f"{app_name}."
+        )
+
+    # ---------------------------------
+    # OPEN LOCAL PATH
+    # ---------------------------------
+
+    def _open_local_path(
+        self,
+        raw_path
+    ):
+
+        result = (
+            self.manager.execute(
+                "open_path",
+                {
+                    "path": raw_path
+                },
+                provider_name=(
+                    "local_system"
+                )
+            )
+        )
+
+        self.last_execution_result = (
+            result
+        )
+
+        if not result.get(
+            "success"
+        ):
+
+            return (
+                "Aether: I couldn't open that path.\n"
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        return (
+            "Aether: Opened path\n"
+            f"{result.get('path', raw_path)}"
+        )
+
+    # ---------------------------------
+    # SHOW RUNNING PROCESSES
+    # ---------------------------------
+
+    def _show_running_processes(
+        self
+    ):
+
+        result = (
+            self.manager.execute(
+                "list_processes",
+                {},
+                provider_name=(
+                    "local_system"
+                )
+            )
+        )
+
+        self.last_execution_result = (
+            result
+        )
+
+        if not result.get(
+            "success"
+        ):
+
+            return (
+                "Aether: I couldn't read the "
+                "running process list.\n"
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        processes = (
+            result.get(
+                "processes",
+                []
+            )
+        )
+
+        if not processes:
+
+            return (
+                "Aether: No running processes "
+                "were returned."
+            )
+
+        display_limit = 40
+
+        output = (
+            "Aether: Running Processes\n\n"
+        )
+
+        for process in (
+            processes[:display_limit]
+        ):
+
+            output += (
+                f"- {process.get('name', '')} "
+                f"(PID {process.get('pid', '')})\n"
+            )
+
+        total = (
+            result.get(
+                "count",
+                len(processes)
+            )
+        )
+
+        if total > display_limit:
+
+            output += (
+                "\nShowing first "
+                f"{display_limit} of {total} processes."
+            )
+
+        return (
+            output.rstrip()
+        )
 
     # ---------------------------------
     # SHOW PROVIDERS
@@ -2000,11 +2360,6 @@ class ProviderSkill:
 
         if closing != -1:
 
-            # Some Qwen responses expose reasoning
-            # followed by only the closing marker.
-            #
-            # In that case the useful final answer
-            # is normally after </think>.
             after = (
                 text[
                     closing
