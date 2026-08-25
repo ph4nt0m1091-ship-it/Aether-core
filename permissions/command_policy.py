@@ -44,7 +44,9 @@ class CommandPolicy:
         "py -m py_compile",
         "where ",
         "where.exe ",
-        "tasklist"
+        "tasklist",
+        "ipconfig",
+        "ping "
     )
 
     BLOCKED_WORDS = {
@@ -85,10 +87,6 @@ class CommandPolicy:
             }
 
         lower = command.lower()
-
-        # ---------------------------------
-        # Hard blocks
-        # ---------------------------------
 
         if lower.startswith(
             self.BLOCKED_PREFIXES
@@ -137,10 +135,6 @@ class CommandPolicy:
                     )
                 }
 
-        # ---------------------------------
-        # Safe read-only commands
-        # ---------------------------------
-
         if lower in self.SAFE_COMMANDS:
 
             return {
@@ -156,10 +150,6 @@ class CommandPolicy:
                 "decision": "allow",
                 "reason": "Known read-only command."
             }
-
-        # ---------------------------------
-        # Everything else requires approval
-        # ---------------------------------
 
         return {
             "decision": "confirm",

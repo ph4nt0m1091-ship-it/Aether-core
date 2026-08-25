@@ -6,6 +6,9 @@ from providers.local_system_provider import LocalSystemProvider
 class TerminalSkill:
     """
     Permission-gated command execution for Aether.
+
+    Supports both explicit command syntax and a small
+    set of natural read-only system requests.
     """
 
     name = "terminal"
@@ -18,24 +21,13 @@ class TerminalSkill:
     def __init__(self, memory):
 
         self.memory = memory
-
         self.provider = LocalSystemProvider()
-
         self.policy = CommandPolicy()
-
         self.permissions = PermissionManager()
-
-    # ---------------------------------
-    # HANDLE
-    # ---------------------------------
 
     def handle(self, message):
 
         message = message.strip()
-
-        # ---------------------------------
-        # HANDLE PENDING PERMISSION
-        # ---------------------------------
 
         if self.permissions.has_pending():
 
@@ -78,9 +70,19 @@ class TerminalSkill:
                 'Say "yes" to approve or "no" to cancel.'
             )
 
-        # ---------------------------------
-        # COMMAND REQUEST
-        # ---------------------------------
+        natural_command = (
+            self._natural_command(
+                message
+            )
+        )
+
+        if natural_command is not None:
+
+            return (
+                self._handle_command(
+                    natural_command
+                )
+            )
 
         prefixes = [
             "run command ",
@@ -113,9 +115,128 @@ class TerminalSkill:
                 "would you like me to run?"
             )
 
-        # ---------------------------------
-        # POLICY CHECK
-        # ---------------------------------
+        return (
+            self._handle_command(
+                command
+            )
+        )
+
+    def _natural_command(
+        self,
+        message
+    ):
+
+        lower = (
+            str(
+                message or ""
+            )
+            .strip()
+            .lower()
+            .rstrip("?")
+        )
+
+        exact_commands = {
+            "show git status": "git status",
+            "check git status": "git status",
+            "what is the git status": "git status",
+            "what's the git status": "git status",
+            "show repository status": "git status",
+            "show repo status": "git status",
+            "check python version": "python --version",
+            "show python version": "python --version",
+            "what python version do i have": "python --version",
+            "what version of python do i have": "python --version",
+            "show my ip": "ipconfig",
+            "show my ip configuration": "ipconfig",
+            "show ip configuration": "ipconfig",
+            "show ip config": "ipconfig",
+            "check my ip": "ipconfig",
+            "check ip configuration": "ipconfig"
+        }
+
+        if lower in exact_commands:
+
+            return (
+                exact_commands[
+                    lower
+                ]
+            )
+
+        ping_prefixes = (
+            "ping ",
+            "check connection to ",
+            "test connection to "
+        )
+
+        for prefix in ping_prefixes:
+
+            if lower.startswith(
+                prefix
+            ):
+
+                target = (
+                    lower[
+                        len(prefix):
+                    ]
+                    .strip()
+                )
+
+                if self._safe_ping_target(
+                    target
+                ):
+
+                    return (
+                        "ping "
+                        + target
+                    )
+
+                return None
+
+        return None
+
+    def _safe_ping_target(
+        self,
+        target
+    ):
+
+        if not target:
+
+            return False
+
+        if len(target) > 253:
+
+            return False
+
+        allowed = set(
+            "abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789"
+            ".-:"
+        )
+
+        return all(
+            character in allowed
+            for character in target
+        )
+
+    def _handle_command(
+        self,
+        command
+    ):
+
+        command = (
+            str(
+                command or ""
+            )
+            .strip()
+        )
+
+        if not command:
+
+            return (
+                "Aether: What command "
+                "would you like me to run?"
+            )
 
         policy = self.policy.classify(
             command
@@ -130,10 +251,6 @@ class TerminalSkill:
             ""
         )
 
-        # ---------------------------------
-        # BLOCK
-        # ---------------------------------
-
         if decision == "block":
 
             return (
@@ -141,19 +258,11 @@ class TerminalSkill:
                 f"Reason: {reason}"
             )
 
-        # ---------------------------------
-        # AUTO-ALLOW READ ONLY
-        # ---------------------------------
-
         if decision == "allow":
 
             return self._execute_command(
                 command
             )
-
-        # ---------------------------------
-        # REQUIRE CONFIRMATION
-        # ---------------------------------
 
         self.permissions.request(
             "run_command",
@@ -168,10 +277,6 @@ class TerminalSkill:
             f"Reason: {reason}\n\n"
             'Say "yes" to approve or "no" to cancel.'
         )
-
-    # ---------------------------------
-    # EXECUTE COMMAND
-    # ---------------------------------
 
     def _execute_command(
         self,
@@ -226,10 +331,6 @@ class TerminalSkill:
             "Aether: Command completed.\n\n"
             f"{output}"
         )
-
-    # ---------------------------------
-    # EXECUTE FOR MISSIONS
-    # ---------------------------------
 
     def execute(self, step):
 
