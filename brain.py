@@ -35,6 +35,25 @@ class Brain:
         self.memory = memory
 
         # ---------------------------------
+        # LOCAL CONVERSATION CONTEXT
+        # ---------------------------------
+        #
+        # Short-term session memory used only by
+        # Aether's local conversational fallback.
+        #
+        # It is intentionally:
+        # - not persisted to disk
+        # - not sent to cloud
+        # - not populated by operational commands
+        # - bounded for lower-memory systems
+
+        self.local_conversation = []
+
+        self.max_local_conversation_turns = 3
+
+        self.max_local_context_chars = 500
+
+        # ---------------------------------
         # CORE SYSTEMS
         # ---------------------------------
 
@@ -89,6 +108,240 @@ class Brain:
         self.router.register(
             MissionCommands()
         )
+
+    # ---------------------------------
+    # LOCAL CONVERSATION CONTEXT
+    # ---------------------------------
+
+    def _is_local_follow_up(
+        self,
+        message
+    ):
+
+        """
+        Detect requests that likely refer to the
+        previous local conversational exchange.
+        """
+
+        if not self.local_conversation:
+
+            return False
+
+        lower = str(
+            message or ""
+        ).strip().lower()
+
+        if not lower:
+
+            return False
+
+        exact_follow_ups = (
+            "why",
+            "why?",
+            "how",
+            "how?",
+            "what about that",
+            "what about it",
+            "explain that",
+            "explain it",
+            "give me an example",
+            "show me an example",
+            "another example",
+            "go deeper",
+            "tell me more",
+            "continue",
+            "keep going"
+        )
+
+        if lower in exact_follow_ups:
+
+            return True
+
+        follow_up_starts = (
+            "now ",
+            "what about ",
+            "and what about ",
+            "so what about ",
+            "can you explain that",
+            "can you explain it",
+            "can you give me an example",
+            "give me another ",
+            "show me another ",
+            "why is that",
+            "why does that",
+            "how does that",
+            "how would that",
+            "what does that mean",
+            "what do you mean by",
+            "do the same ",
+            "same thing but "
+        )
+
+        return lower.startswith(
+            follow_up_starts
+        )
+
+    def _local_context_prompt(
+        self,
+        message
+    ):
+
+        """
+        Build a small local-only context prompt.
+
+        Only recent local conversational turns are
+        included, and the total added context is
+        intentionally kept small.
+        """
+
+        if not self._is_local_follow_up(
+            message
+        ):
+
+            return str(
+                message or ""
+            ).strip()
+
+        remaining = (
+            self.max_local_context_chars
+        )
+
+        context_parts = []
+
+        for turn in reversed(
+            self.local_conversation
+        ):
+
+            user_text = str(
+                turn.get(
+                    "user",
+                    ""
+                )
+            ).strip()
+
+            assistant_text = str(
+                turn.get(
+                    "assistant",
+                    ""
+                )
+            ).strip()
+
+            chunk = (
+                "Previous user message: "
+                + user_text
+                + "\n"
+                + "Previous Aether answer: "
+                + assistant_text
+            )
+
+            if len(chunk) > remaining:
+
+                chunk = (
+                    chunk[:remaining]
+                    .rstrip()
+                )
+
+            if chunk:
+
+                context_parts.append(
+                    chunk
+                )
+
+                remaining -= len(
+                    chunk
+                )
+
+            if remaining <= 0:
+
+                break
+
+        context_parts.reverse()
+
+        if not context_parts:
+
+            return str(
+                message or ""
+            ).strip()
+
+        return (
+            "Use the recent conversation context "
+            "only to understand references in the "
+            "current follow-up. Resolve words such as "
+            "'it', 'that', and 'they' from the context. "
+            "Answer every part of the current request "
+            "directly. If the user asks for a comparison, "
+            "explicitly describe both sides.\n\n"
+            + "\n\n".join(
+                context_parts
+            )
+            + "\n\nCurrent user request: "
+            + str(
+                message or ""
+            ).strip()
+        )
+
+    def _remember_local_conversation(
+        self,
+        user_message,
+        local_response
+    ):
+
+        """
+        Save one successful local conversational turn
+        in short-term session memory.
+        """
+
+        response_text = str(
+            local_response or ""
+        ).strip()
+
+        # ProviderSkill displays routing metadata
+        # before the actual answer. Keep only the
+        # user-facing answer in conversational context.
+        if "\n\n" in response_text:
+
+            response_text = (
+                response_text
+                .split(
+                    "\n\n",
+                    1
+                )[1]
+                .strip()
+            )
+
+        # Keep context compact on low-memory systems.
+        response_text = (
+            response_text[:360]
+            .rstrip()
+        )
+
+        user_text = (
+            str(
+                user_message or ""
+            )
+            .strip()[:140]
+        )
+
+        if not user_text or not response_text:
+
+            return
+
+        self.local_conversation.append(
+            {
+                "user": user_text,
+                "assistant": response_text
+            }
+        )
+
+        if len(
+            self.local_conversation
+        ) > self.max_local_conversation_turns:
+
+            self.local_conversation = (
+                self.local_conversation[
+                    -self.max_local_conversation_turns:
+                ]
+            )
 
     # ---------------------------------
     # MAIN THOUGHT CYCLE
@@ -427,9 +680,35 @@ class Brain:
         #
         # This path never routes to cloud.
 
-        local_request = (
-            message
+        is_local_follow_up = (
+            self._is_local_follow_up(
+                message
+            )
         )
+
+        local_request = (
+            self._local_context_prompt(
+                message
+            )
+        )
+
+        # Contextual follow-ups stay on the fast
+        # local model.
+        #
+        # The injected conversation history can contain
+        # complexity keywords such as "compare" or
+        # "analyze" that would otherwise promote a
+        # lightweight follow-up to Qwen.
+        #
+        # Keeping follow-ups on Gemma is faster,
+        # lighter, and avoids unnecessary reasoning
+        # leakage on this local setup.
+        if is_local_follow_up:
+
+            local_request = (
+                "fast "
+                + local_request
+            )
 
         lower_message = (
             message.lower()
@@ -558,6 +837,11 @@ class Brain:
         )
 
         if local_response is not None:
+
+            self._remember_local_conversation(
+                message,
+                local_response
+            )
 
             return local_response
 
