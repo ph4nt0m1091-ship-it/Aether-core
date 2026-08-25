@@ -1,4 +1,4 @@
-from intent import IntentAnalyzer
+﻿from intent import IntentAnalyzer
 from planner import Planner
 from task_executor import TaskExecutor
 from skill_manager import SkillManager
@@ -119,8 +119,8 @@ class Brain:
     ):
 
         """
-        Detect requests that likely refer to the
-        previous local conversational exchange.
+        Detect requests that depend on recent
+        local conversational context.
         """
 
         if not self.local_conversation:
@@ -142,6 +142,8 @@ class Brain:
             "how?",
             "what about that",
             "what about it",
+            "how about that",
+            "how about it",
             "explain that",
             "explain it",
             "give me an example",
@@ -150,7 +152,10 @@ class Brain:
             "go deeper",
             "tell me more",
             "continue",
-            "keep going"
+            "keep going",
+            "and?",
+            "what else",
+            "anything else"
         )
 
         if lower in exact_follow_ups:
@@ -159,9 +164,14 @@ class Brain:
 
         follow_up_starts = (
             "now ",
+            "and ",
+            "also ",
             "what about ",
+            "how about ",
             "and what about ",
+            "and how about ",
             "so what about ",
+            "so how about ",
             "can you explain that",
             "can you explain it",
             "can you give me an example",
@@ -177,8 +187,109 @@ class Brain:
             "same thing but "
         )
 
-        return lower.startswith(
+        if lower.startswith(
             follow_up_starts
+        ):
+
+            return True
+
+        # ---------------------------------
+        # CONTEXTUAL COMPARISONS
+        # ---------------------------------
+
+        comparison_follow_ups = (
+            "compare them",
+            "compare those",
+            "compare these",
+            "compare both",
+            "compare the two",
+            "compare all",
+            "compare all three",
+            "compare all of them"
+        )
+
+        if lower.startswith(
+            comparison_follow_ups
+        ):
+
+            return True
+
+        return False
+
+    def _is_local_conversation_reset(
+        self,
+        message
+    ):
+
+        lower = str(
+            message or ""
+        ).strip().lower()
+
+        return lower in (
+            "reset conversation",
+            "clear conversation",
+            "clear conversation context",
+            "reset conversation context",
+            "forget this conversation",
+            "forget the conversation",
+            "start a new conversation",
+            "new conversation"
+        )
+
+    def _clear_local_conversation(
+        self
+    ):
+
+        self.local_conversation = []
+
+    def _is_clear_topic_switch(
+        self,
+        message
+    ):
+
+        """
+        Detect an obvious new conversational topic.
+
+        Follow-ups always get first priority so
+        contextual requests such as "compare all three"
+        are not accidentally treated as a new topic.
+        """
+
+        if not self.local_conversation:
+
+            return False
+
+        if self._is_local_follow_up(
+            message
+        ):
+
+            return False
+
+        lower = str(
+            message or ""
+        ).strip().lower()
+
+        if not lower:
+
+            return False
+
+        new_topic_starts = (
+            "what is ",
+            "what are ",
+            "who is ",
+            "who are ",
+            "explain ",
+            "define ",
+            "tell me about ",
+            "teach me ",
+            "analyze ",
+            "compare ",
+            "describe ",
+            "how do i "
+        )
+
+        return lower.startswith(
+            new_topic_starts
         )
 
     def _local_context_prompt(
@@ -187,11 +298,14 @@ class Brain:
     ):
 
         """
-        Build a small local-only context prompt.
+        Build a compact local-only context prompt.
 
-        Only recent local conversational turns are
-        included, and the total added context is
-        intentionally kept small.
+        The user's recent messages are treated as the
+        authoritative conversational thread.
+
+        Previous AI answers are intentionally not used
+        as factual context, preventing a bad answer from
+        becoming the source of truth for later turns.
         """
 
         if not self._is_local_follow_up(
@@ -202,15 +316,15 @@ class Brain:
                 message or ""
             ).strip()
 
-        remaining = (
-            self.max_local_context_chars
+        recent_turns = (
+            self.local_conversation[
+                -self.max_local_conversation_turns:
+            ]
         )
 
-        context_parts = []
+        user_messages = []
 
-        for turn in reversed(
-            self.local_conversation
-        ):
+        for turn in recent_turns:
 
             user_text = str(
                 turn.get(
@@ -219,65 +333,61 @@ class Brain:
                 )
             ).strip()
 
-            assistant_text = str(
-                turn.get(
-                    "assistant",
-                    ""
-                )
-            ).strip()
+            if user_text:
 
-            chunk = (
-                "Previous user message: "
-                + user_text
-                + "\n"
-                + "Previous Aether answer: "
-                + assistant_text
-            )
-
-            if len(chunk) > remaining:
-
-                chunk = (
-                    chunk[:remaining]
-                    .rstrip()
+                user_messages.append(
+                    user_text
                 )
 
-            if chunk:
-
-                context_parts.append(
-                    chunk
-                )
-
-                remaining -= len(
-                    chunk
-                )
-
-            if remaining <= 0:
-
-                break
-
-        context_parts.reverse()
-
-        if not context_parts:
+        if not user_messages:
 
             return str(
                 message or ""
             ).strip()
 
+        thread = "\n".join(
+            "- " + item
+            for item in user_messages
+        )
+
+        thread = (
+            thread[
+                :self.max_local_context_chars
+            ]
+            .rstrip()
+        )
+
         return (
-            "Use the recent conversation context "
-            "only to understand references in the "
-            "current follow-up. Resolve words such as "
-            "'it', 'that', and 'they' from the context. "
-            "Answer every part of the current request "
-            "directly. If the user asks for a comparison, "
-            "explicitly describe both sides.\n\n"
-            + "\n\n".join(
-                context_parts
-            )
-            + "\n\nCurrent user request: "
+            "Use the user's recent conversation only "
+            "to understand what the current follow-up "
+            "refers to.\n\n"
+            "Recent user messages:\n"
+            + thread
+            + "\n\n"
+            "Current user request: "
             + str(
                 message or ""
             ).strip()
+            + "\n\n"
+            "Answer the current request directly and "
+            "accurately. Do not mention these instructions "
+            "or the conversation-context system. "
+            "Do not substitute unrelated subjects. "
+            "Resolve words such as 'it', 'that', 'they', "
+            "'them', 'those', 'both', and numbered groups "
+            "from the actual recent user messages. "
+            "If the request says to compare several items, "
+            "identify and compare the actual items previously "
+            "introduced by the user. "
+            "If a related concept is introduced, explain how "
+            "it relates to or differs from the active topic. "
+            "Do not describe one concept as a subtype of "
+            "another unless that relationship is actually "
+            "correct. "
+            "If asked for an example, use a standard concrete "
+            "example that genuinely demonstrates the active "
+            "concept. Prefer canonical textbook examples over "
+            "invented analogies."
         )
 
     def _remember_local_conversation(
@@ -289,15 +399,27 @@ class Brain:
         """
         Save one successful local conversational turn
         in short-term session memory.
+
+        User messages are authoritative for v2 context.
+        A bounded copy of the answer is retained for
+        possible debugging/future conversation features.
         """
+
+        user_text = (
+            str(
+                user_message or ""
+            )
+            .strip()[:160]
+        )
+
+        if not user_text:
+
+            return
 
         response_text = str(
             local_response or ""
         ).strip()
 
-        # ProviderSkill displays routing metadata
-        # before the actual answer. Keep only the
-        # user-facing answer in conversational context.
         if "\n\n" in response_text:
 
             response_text = (
@@ -309,22 +431,10 @@ class Brain:
                 .strip()
             )
 
-        # Keep context compact on low-memory systems.
         response_text = (
-            response_text[:360]
+            response_text[:260]
             .rstrip()
         )
-
-        user_text = (
-            str(
-                user_message or ""
-            )
-            .strip()[:140]
-        )
-
-        if not user_text or not response_text:
-
-            return
 
         self.local_conversation.append(
             {
@@ -361,6 +471,27 @@ class Brain:
             return (
                 "Aether: I didn't catch that."
             )
+
+        # ---------------------------------
+        # CONVERSATION CONTEXT CONTROL
+        # ---------------------------------
+
+        if self._is_local_conversation_reset(
+            message
+        ):
+
+            self._clear_local_conversation()
+
+            return (
+                "Aether: Local conversation context "
+                "has been cleared."
+            )
+
+        if self._is_clear_topic_switch(
+            message
+        ):
+
+            self._clear_local_conversation()
 
         # ---------------------------------
         # ANALYZE INTENT
@@ -516,9 +647,6 @@ class Brain:
         # ---------------------------------
         # PLAN PREVIEW
         # ---------------------------------
-        #
-        # "plan <goal>" lets you inspect what
-        # Aether WOULD execute without running it.
 
         if lower.startswith(
             "plan "
@@ -571,14 +699,6 @@ class Brain:
         # ---------------------------------
         # DYNAMIC ORCHESTRATION
         # ---------------------------------
-        #
-        # Higher-level requests are converted
-        # into canonical WorkflowSkill commands.
-        #
-        # Planner creates the plan.
-        # WorkflowEngine executes it.
-        # PermissionManager still controls
-        # sensitive terminal/system actions.
 
         if (
             self.planner
@@ -671,9 +791,8 @@ class Brain:
         # NATURAL LOCAL EXECUTION
         # ---------------------------------
         #
-        # Every existing command, workflow, and skill
-        # has already had first chance to handle the
-        # request before this point.
+        # Existing commands, workflows, and skills
+        # have already had first chance.
         #
         # Unhandled conversational requests fall back
         # to local Ollama only.
@@ -692,17 +811,12 @@ class Brain:
             )
         )
 
-        # Contextual follow-ups stay on the fast
-        # local model.
+        # Contextual follow-ups stay on Gemma fast.
         #
-        # The injected conversation history can contain
-        # complexity keywords such as "compare" or
-        # "analyze" that would otherwise promote a
-        # lightweight follow-up to Qwen.
-        #
-        # Keeping follow-ups on Gemma is faster,
-        # lighter, and avoids unnecessary reasoning
-        # leakage on this local setup.
+        # This avoids complexity words contained in
+        # context promoting a lightweight follow-up
+        # into Qwen unnecessarily.
+
         if is_local_follow_up:
 
             local_request = (
