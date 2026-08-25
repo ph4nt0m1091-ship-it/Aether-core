@@ -1450,17 +1450,16 @@ class ProviderSkill:
 
                 break
 
-            # Quality failures get another local
-            # generation attempt even though Ollama
-            # itself technically completed.
+            # A reasoning leak is a model-quality
+            # failure, not a provider failure.
+            #
+            # Retrying the same Qwen model usually
+            # wastes time and memory, so immediately
+            # move to Aether's local fallback tier.
+            #
+            # Real provider failures still use the
+            # normal resilience retry policy below.
             if quality_failure:
-
-                if (
-                    attempt_number
-                    < self.MAX_PRIMARY_ATTEMPTS
-                ):
-
-                    continue
 
                 break
 
@@ -1778,6 +1777,7 @@ class ProviderSkill:
             "hmm, the user",
             "okay, the user",
             "we are asked",
+            "we are to ",
             "we are given the instruction",
             "we are given an instruction",
             "we are comparing",
