@@ -62,9 +62,22 @@ def main():
 
                 break
 
-            memory.remember(
-                user_input
+            memory_result = (
+                memory.remember(
+                    user_input
+                )
             )
+
+            if memory_result is not None:
+
+                print(
+                    memory_result.get(
+                        "response",
+                        "Aether: Memory updated."
+                    )
+                )
+
+                continue
 
             response = brain.think(
                 user_input

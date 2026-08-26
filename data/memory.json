@@ -1,9 +1,24 @@
 {
-    "name": "lope",
-    "favorite_color": "blue",
-    "dog_name": "Max",
-    "likes": [
-        "pizza",
-        "tacos"
-    ]
+    "version": 2,
+    "identity": {
+        "name": "lope"
+    },
+    "preferences": {
+        "favorite_color": "blue",
+        "likes": [
+            "pizza",
+            "tacos"
+        ],
+        "facts": {
+            "preference": "local AI"
+        }
+    },
+    "people_and_pets": {
+        "dog_name": "Max"
+    },
+    "projects": {
+        "main": "Aether"
+    },
+    "goals": [],
+    "notes": []
 }
