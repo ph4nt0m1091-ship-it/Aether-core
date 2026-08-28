@@ -10,7 +10,8 @@
             "tacos"
         ],
         "facts": {
-            "preference": "local AI"
+            "preference": "local AI",
+            "favorite_editor": "VS Code"
         }
     },
     "people_and_pets": {
