@@ -467,6 +467,234 @@ class FailureMemory:
         ]
 
     # ---------------------------------
+    # ADAPTIVE RECOVERY EVIDENCE
+    # ---------------------------------
+
+    def adaptive_recovery_evidence(
+        self,
+        step,
+        result
+    ):
+        """
+        Return conservative evidence that may justify
+        skipping one redundant same-model retry.
+
+        Evidence is observational only. This method does
+        not choose a provider, execute anything, change
+        permissions, or introduce a cloud route.
+        """
+
+        if not isinstance(
+            step,
+            dict
+        ):
+
+            return {
+                "repeated_failure_count": 0,
+                "preferred_fallback_model": None,
+                "preferred_fallback_successes": 0,
+                "fallback_successes": {}
+            }
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            result = {}
+
+        event = self._failure_event(
+            "",
+            step,
+            result,
+            phase="initial"
+        )
+
+        data = self.load()
+
+        pattern = (
+            data.get(
+                "patterns",
+                {}
+            )
+            .get(
+                event[
+                    "signature"
+                ],
+                {}
+            )
+        )
+
+        repeated_failure_count = int(
+            pattern.get(
+                "count",
+                0
+            )
+            if isinstance(
+                pattern,
+                dict
+            )
+            else 0
+        )
+
+        step_data = step.get(
+            "data",
+            {}
+        )
+
+        if not isinstance(
+            step_data,
+            dict
+        ):
+
+            step_data = {}
+
+        current_model = str(
+            result.get(
+                "model",
+                step_data.get(
+                    "model",
+                    ""
+                )
+            )
+            or ""
+        ).strip()
+
+        action = str(
+            step.get(
+                "action",
+                ""
+            )
+            or ""
+        )
+
+        target = str(
+            step.get(
+                "target",
+                ""
+            )
+            or ""
+        )
+
+        capability = str(
+            result.get(
+                "capability",
+                action
+            )
+            or ""
+        )
+
+        successes = {}
+
+        for recovery in data.get(
+            "recoveries",
+            []
+        ):
+
+            if not isinstance(
+                recovery,
+                dict
+            ):
+
+                continue
+
+            if not recovery.get(
+                "fallback_succeeded",
+                False
+            ):
+
+                continue
+
+            if str(
+                recovery.get(
+                    "action",
+                    ""
+                )
+                or ""
+            ) != action:
+
+                continue
+
+            if str(
+                recovery.get(
+                    "target",
+                    ""
+                )
+                or ""
+            ) != target:
+
+                continue
+
+            if str(
+                recovery.get(
+                    "capability",
+                    ""
+                )
+                or ""
+            ) != capability:
+
+                continue
+
+            if str(
+                recovery.get(
+                    "fallback_from_model",
+                    ""
+                )
+                or ""
+            ) != current_model:
+
+                continue
+
+            fallback_model = str(
+                recovery.get(
+                    "fallback_model",
+                    ""
+                )
+                or ""
+            ).strip()
+
+            if not fallback_model:
+
+                continue
+
+            successes[
+                fallback_model
+            ] = (
+                successes.get(
+                    fallback_model,
+                    0
+                )
+                + 1
+            )
+
+        preferred_model = None
+        preferred_successes = 0
+
+        for model, count in successes.items():
+
+            if count > preferred_successes:
+
+                preferred_model = model
+                preferred_successes = count
+
+        return {
+            "repeated_failure_count": (
+                repeated_failure_count
+            ),
+            "preferred_fallback_model": (
+                preferred_model
+            ),
+            "preferred_fallback_successes": (
+                preferred_successes
+            ),
+            "fallback_successes": successes,
+            "current_model": current_model,
+            "action": action,
+            "target": target,
+            "capability": capability
+        }
+
+    # ---------------------------------
     # INTERNALS
     # ---------------------------------
 

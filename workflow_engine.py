@@ -362,6 +362,31 @@ class WorkflowEngine:
                 "unknown"
             )
 
+            if recovery.get(
+                "adaptive_recovery"
+            ):
+
+                known_successes = int(
+                    recovery.get(
+                        "preferred_fallback_successes",
+                        0
+                    )
+                    or 0
+                )
+
+                return (
+                    "Aether used adaptive local recovery: "
+                    "this exact temporary failure had "
+                    "repeated enough times to skip one "
+                    "redundant same-model retry. The "
+                    f"approved local fallback {from_model} "
+                    f"-> {to_model}, which had already "
+                    f"succeeded {known_successes} times, "
+                    "succeeded again and the workflow "
+                    "continued."
+                    + repeated
+                )
+
             return (
                 "Aether recovered automatically: "
                 "the original step and its safe retry "
@@ -504,13 +529,15 @@ class WorkflowEngine:
         workflow,
         step,
         retry_result,
-        recovery
+        recovery,
+        preferred_model=None
     ):
 
         plan = (
             self.resilience.fallback_plan(
                 step,
-                retry_result
+                retry_result,
+                preferred_model=preferred_model
             )
         )
 
@@ -724,9 +751,18 @@ class WorkflowEngine:
         step
     ):
         """
-        Execute one workflow step with conservative
-        recovery, persistent operational failure memory,
-        and deterministic recovery reporting.
+        Execute one workflow step with conservative,
+        history-aware recovery.
+
+        Adaptive behavior is narrow and evidence based.
+        Aether may skip one redundant same-model retry only
+        when the exact temporary failure has repeated at
+        least three times and the same approved local
+        fallback has already succeeded at least twice.
+
+        This never expands the fallback allowlist, bypasses
+        permission gates, invents commands, or routes local
+        work to cloud.
         """
 
         first_result = self._execute_step(
@@ -804,7 +840,9 @@ class WorkflowEngine:
                 "capability": capability,
                 "failure_type": failure_type,
                 "fallback_attempted": False,
-                "repeat_failure_count": repeat_count
+                "repeat_failure_count": repeat_count,
+                "adaptive_recovery": False,
+                "retry_skipped": False
             }
 
             first_result[
@@ -819,6 +857,123 @@ class WorkflowEngine:
                     recovery
                 )
             )
+
+        # ---------------------------------
+        # ADAPTIVE EVIDENCE
+        # ---------------------------------
+
+        try:
+
+            evidence = (
+                self.failure_memory
+                .adaptive_recovery_evidence(
+                    step,
+                    first_result
+                )
+            )
+
+        except OSError:
+
+            evidence = {}
+
+        adaptive = (
+            self.resilience
+            .adaptive_retry_decision(
+                capability,
+                first_result,
+                evidence,
+                step=step
+            )
+        )
+
+        if adaptive.get(
+            "skip_retry"
+        ):
+
+            recovery = {
+                "attempted": True,
+                "attempts": 1,
+                "retry_succeeded": False,
+                "retry_skipped": True,
+                "adaptive_recovery": True,
+                "adaptive_reason": (
+                    adaptive.get(
+                        "reason"
+                    )
+                ),
+                "capability": capability,
+                "failure_type": failure_type,
+                "initial_error": (
+                    first_result.get(
+                        "error",
+                        ""
+                    )
+                ),
+                "retry_error": None,
+                "fallback_attempted": False,
+                "repeat_failure_count": max(
+                    repeat_count,
+                    int(
+                        adaptive.get(
+                            "repeated_failure_count",
+                            0
+                        )
+                        or 0
+                    )
+                ),
+                "preferred_fallback_model": (
+                    adaptive.get(
+                        "preferred_model"
+                    )
+                ),
+                "preferred_fallback_successes": (
+                    int(
+                        adaptive.get(
+                            "preferred_fallback_successes",
+                            0
+                        )
+                        or 0
+                    )
+                )
+            }
+
+            self.ledger.record(
+                workflow.workflow_id,
+                step,
+                result=first_result,
+                status="adaptive_retry_skipped"
+            )
+
+            fallback_result, recovery = (
+                self._attempt_safe_fallback(
+                    workflow,
+                    step,
+                    first_result,
+                    recovery,
+                    preferred_model=(
+                        adaptive.get(
+                            "preferred_model"
+                        )
+                    )
+                )
+            )
+
+            fallback_result[
+                "recovery"
+            ] = recovery
+
+            return (
+                self._attach_recovery_summary(
+                    workflow,
+                    step,
+                    fallback_result,
+                    recovery
+                )
+            )
+
+        # ---------------------------------
+        # NORMAL SAFE RETRY
+        # ---------------------------------
 
         self.ledger.record(
             workflow.workflow_id,
@@ -836,6 +991,8 @@ class WorkflowEngine:
             "attempted": True,
             "attempts": 2,
             "retry_succeeded": False,
+            "retry_skipped": False,
+            "adaptive_recovery": False,
             "capability": capability,
             "failure_type": failure_type,
             "initial_error": (

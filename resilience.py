@@ -116,7 +116,8 @@ class ResiliencePolicy:
     def fallback_plan(
         self,
         step,
-        result
+        result,
+        preferred_model=None
     ):
         """
         Return a deterministic, local-only fallback plan.
@@ -212,6 +213,27 @@ class ResiliencePolicy:
 
             return None
 
+        preferred_model = str(
+            preferred_model or ""
+        ).strip()
+
+        # Adaptive history may reorder only the already
+        # approved local fallback candidates. It cannot
+        # add a new model, provider, capability, or cloud
+        # route.
+        if (
+            preferred_model
+            and preferred_model in candidates
+        ):
+
+            candidates = [
+                preferred_model
+            ] + [
+                model
+                for model in candidates
+                if model != preferred_model
+            ]
+
         error = str(
             result.get(
                 "error",
@@ -237,6 +259,156 @@ class ResiliencePolicy:
                 "its safe retry did not succeed."
             )
         }
+
+    # ---------------------------------
+    # ADAPTIVE RETRY DECISION
+    # ---------------------------------
+
+    def adaptive_retry_decision(
+        self,
+        capability,
+        result,
+        evidence,
+        step=None
+    ):
+        """
+        Decide whether strong local history justifies
+        skipping one redundant same-model retry.
+
+        This is intentionally narrow:
+        - generate_text only
+        - the current error must already be safely retryable
+        - the exact failure pattern must have occurred at
+          least three times
+        - the same approved local fallback model must have
+          succeeded at least twice before
+
+        The decision never authorizes a new fallback.
+        fallback_plan still enforces the local-only allowlist.
+        """
+
+        decision = {
+            "skip_retry": False,
+            "reason": None,
+            "preferred_model": None,
+            "repeated_failure_count": 0,
+            "preferred_fallback_successes": 0
+        }
+
+        if capability != "generate_text":
+
+            return decision
+
+        if not self.can_retry(
+            capability,
+            result
+        ):
+
+            return decision
+
+        if not isinstance(
+            evidence,
+            dict
+        ):
+
+            return decision
+
+        repeated = int(
+            evidence.get(
+                "repeated_failure_count",
+                0
+            )
+            or 0
+        )
+
+        fallback_successes = int(
+            evidence.get(
+                "preferred_fallback_successes",
+                0
+            )
+            or 0
+        )
+
+        preferred_model = str(
+            evidence.get(
+                "preferred_fallback_model",
+                ""
+            )
+            or ""
+        ).strip()
+
+        decision[
+            "repeated_failure_count"
+        ] = repeated
+
+        decision[
+            "preferred_fallback_successes"
+        ] = fallback_successes
+
+        decision[
+            "preferred_model"
+        ] = (
+            preferred_model
+            or None
+        )
+
+        if repeated < 3:
+
+            return decision
+
+        if fallback_successes < 2:
+
+            return decision
+
+        if not preferred_model:
+
+            return decision
+
+        # Adaptive retry skipping is allowed only when the
+        # exact step is already eligible for Aether's
+        # deterministic local-only fallback policy.
+        #
+        # This blocks cloud targets, permission failures,
+        # destructive/state-changing actions, unsupported
+        # capabilities, and unapproved fallback models.
+        if not isinstance(
+            step,
+            dict
+        ):
+
+            return decision
+
+        fallback = self.fallback_plan(
+            step,
+            result,
+            preferred_model=preferred_model
+        )
+
+        if fallback is None:
+
+            return decision
+
+        if preferred_model not in fallback.get(
+            "candidates",
+            []
+        ):
+
+            return decision
+
+        decision[
+            "skip_retry"
+        ] = True
+
+        decision[
+            "reason"
+        ] = (
+            "The exact temporary failure has repeated "
+            "at least three times and the same approved "
+            "local fallback has already recovered it at "
+            "least twice."
+        )
+
+        return decision
 
     # ---------------------------------
     # FAILURE CATEGORY
