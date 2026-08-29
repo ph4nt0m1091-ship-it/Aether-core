@@ -275,18 +275,249 @@ class WorkflowEngine:
 
         return None
 
+    def _build_fallback_step(
+        self,
+        step,
+        model
+    ):
+        """
+        Create a copy of a direct local provider step with
+        only its approved model changed.
+        """
+
+        fallback_step = dict(
+            step
+        )
+
+        original_data = step.get(
+            "data",
+            {}
+        )
+
+        fallback_data = dict(
+            original_data
+            if isinstance(
+                original_data,
+                dict
+            )
+            else {}
+        )
+
+        fallback_data[
+            "model"
+        ] = model
+
+        fallback_step[
+            "data"
+        ] = fallback_data
+
+        return fallback_step
+
+    def _attempt_safe_fallback(
+        self,
+        workflow,
+        step,
+        retry_result,
+        recovery
+    ):
+        """
+        Try deterministic fallback candidates after the
+        original attempt and one safe retry have failed.
+
+        Only ResiliencePolicy-approved fallback plans are
+        accepted. Each fallback attempt is recorded in the
+        execution ledger. Permission pauses are returned
+        immediately and never bypassed.
+        """
+
+        plan = (
+            self.resilience.fallback_plan(
+                step,
+                retry_result
+            )
+        )
+
+        if plan is None:
+
+            recovery[
+                "fallback_attempted"
+            ] = False
+
+            return (
+                retry_result,
+                recovery
+            )
+
+        candidates = list(
+            plan.get(
+                "candidates",
+                []
+            )
+        )
+
+        recovery[
+            "fallback_attempted"
+        ] = bool(
+            candidates
+        )
+
+        recovery[
+            "fallback_provider"
+        ] = plan.get(
+            "provider"
+        )
+
+        recovery[
+            "fallback_from_model"
+        ] = plan.get(
+            "from_model"
+        )
+
+        recovery[
+            "fallback_candidates"
+        ] = candidates
+
+        recovery[
+            "fallback_succeeded"
+        ] = False
+
+        recovery[
+            "fallback_model"
+        ] = None
+
+        recovery[
+            "fallback_errors"
+        ] = []
+
+        for model in candidates:
+
+            fallback_step = (
+                self._build_fallback_step(
+                    step,
+                    model
+                )
+            )
+
+            self.ledger.record(
+                workflow.workflow_id,
+                fallback_step,
+                status="fallback_started"
+            )
+
+            fallback_result = (
+                self._execute_step(
+                    workflow,
+                    fallback_step
+                )
+            )
+
+            if fallback_result.get(
+                "paused"
+            ):
+
+                recovery[
+                    "fallback_model"
+                ] = model
+
+                recovery[
+                    "fallback_pause"
+                ] = True
+
+                fallback_result[
+                    "recovery"
+                ] = recovery
+
+                return (
+                    fallback_result,
+                    recovery
+                )
+
+            if fallback_result.get(
+                "success",
+                False
+            ):
+
+                recovery[
+                    "fallback_succeeded"
+                ] = True
+
+                recovery[
+                    "fallback_model"
+                ] = model
+
+                fallback_result[
+                    "failure_type"
+                ] = "success"
+
+                fallback_result[
+                    "recovery"
+                ] = recovery
+
+                self.ledger.record(
+                    workflow.workflow_id,
+                    fallback_step,
+                    result=fallback_result,
+                    status="fallback_completed"
+                )
+
+                return (
+                    fallback_result,
+                    recovery
+                )
+
+            fallback_error = (
+                fallback_result.get(
+                    "error",
+                    "Unknown fallback error."
+                )
+            )
+
+            recovery[
+                "fallback_errors"
+            ].append(
+                {
+                    "model": model,
+                    "error": fallback_error,
+                    "failure_type": (
+                        self.resilience.classify(
+                            fallback_result
+                        )
+                    )
+                }
+            )
+
+            self.ledger.record(
+                workflow.workflow_id,
+                fallback_step,
+                result=fallback_result,
+                status="fallback_failed"
+            )
+
+        retry_result[
+            "recovery"
+        ] = recovery
+
+        return (
+            retry_result,
+            recovery
+        )
+
     def _execute_with_recovery(
         self,
         workflow,
         step
     ):
         """
-        Execute one workflow step and retry it at most
-        once when the shared resilience policy says the
-        failure is temporary and the capability is safe.
+        Execute one workflow step with conservative
+        recovery:
 
-        Permission-gated, destructive, and unknown
-        operations are never automatically retried.
+        1. Run the original step.
+        2. Retry it once only when the shared policy says
+           that retry is safe.
+        3. If that retry still fails, optionally try an
+           explicitly approved deterministic fallback.
+        4. Never bypass a permission pause or silently
+           move a local request to cloud.
         """
 
         first_result = self._execute_step(
@@ -339,13 +570,12 @@ class WorkflowEngine:
                 "attempts": 1,
                 "retry_succeeded": False,
                 "capability": capability,
-                "failure_type": failure_type
+                "failure_type": failure_type,
+                "fallback_attempted": False
             }
 
             return first_result
 
-        # Keep a durable record of the original failure
-        # before attempting the safe retry.
         self.ledger.record(
             workflow.workflow_id,
             step,
@@ -358,26 +588,29 @@ class WorkflowEngine:
             step
         )
 
-        # A retry must never bypass a permission pause.
+        recovery = {
+            "attempted": True,
+            "attempts": 2,
+            "retry_succeeded": False,
+            "capability": capability,
+            "failure_type": failure_type,
+            "initial_error": (
+                first_result.get(
+                    "error",
+                    ""
+                )
+            ),
+            "retry_error": None,
+            "fallback_attempted": False
+        }
+
         if retry_result.get(
             "paused"
         ):
 
             retry_result[
                 "recovery"
-            ] = {
-                "attempted": True,
-                "attempts": 2,
-                "retry_succeeded": False,
-                "capability": capability,
-                "failure_type": failure_type,
-                "initial_error": (
-                    first_result.get(
-                        "error",
-                        ""
-                    )
-                )
-            }
+            ] = recovery
 
             return retry_result
 
@@ -388,43 +621,55 @@ class WorkflowEngine:
             )
         )
 
+        recovery[
+            "retry_succeeded"
+        ] = retry_succeeded
+
+        recovery[
+            "retry_error"
+        ] = (
+            None
+            if retry_succeeded
+            else retry_result.get(
+                "error",
+                ""
+            )
+        )
+
+        if retry_succeeded:
+
+            retry_result[
+                "failure_type"
+            ] = "success"
+
+            retry_result[
+                "recovery"
+            ] = recovery
+
+            return retry_result
+
         retry_result[
             "failure_type"
         ] = (
-            "success"
-            if retry_succeeded
-            else self.resilience.classify(
+            self.resilience.classify(
                 retry_result
             )
         )
 
-        retry_result[
-            "recovery"
-        ] = {
-            "attempted": True,
-            "attempts": 2,
-            "retry_succeeded": (
-                retry_succeeded
-            ),
-            "capability": capability,
-            "failure_type": failure_type,
-            "initial_error": (
-                first_result.get(
-                    "error",
-                    ""
-                )
-            ),
-            "retry_error": (
-                None
-                if retry_succeeded
-                else retry_result.get(
-                    "error",
-                    ""
-                )
+        fallback_result, recovery = (
+            self._attempt_safe_fallback(
+                workflow,
+                step,
+                retry_result,
+                recovery
             )
-        }
+        )
 
-        return retry_result
+        fallback_result[
+            "recovery"
+        ] = recovery
+
+        return fallback_result
 
     # ---------------------------------
     # EXECUTE STEP
