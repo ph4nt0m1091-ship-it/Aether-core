@@ -38,7 +38,10 @@ class ResiliencePolicy:
     SAFE_RETRY_CAPABILITIES = (
         "generate_text",
         "list_models",
-        "warm_model"
+        "warm_model",
+        "list_processes",
+        "research",
+        "web_search"
     )
 
     # ---------------------------------

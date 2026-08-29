@@ -1,4 +1,5 @@
 from execution_ledger import ExecutionLedger
+from resilience import ResiliencePolicy
 
 from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
@@ -52,6 +53,10 @@ class WorkflowEngine:
             ExecutionLedger()
         )
 
+        self.resilience = (
+            ResiliencePolicy()
+        )
+
     # ---------------------------------
     # EXECUTE WORKFLOW
     # ---------------------------------
@@ -79,7 +84,7 @@ class WorkflowEngine:
                 status="started"
             )
 
-            result = self._execute_step(
+            result = self._execute_with_recovery(
                 workflow,
                 step
             )
@@ -175,6 +180,27 @@ class WorkflowEngine:
                     "progress": (
                         workflow.progress()
                     ),
+                    "failed_step": (
+                        workflow.current_step
+                    ),
+                    "failure_type": (
+                        result.get(
+                            "failure_type",
+                            "unknown"
+                        )
+                    ),
+                    "recovery": (
+                        result.get(
+                            "recovery",
+                            {}
+                        )
+                    ),
+                    "error": (
+                        result.get(
+                            "error",
+                            "Unknown workflow error."
+                        )
+                    ),
                     "results": (
                         workflow.results
                     )
@@ -197,6 +223,208 @@ class WorkflowEngine:
                 workflow.results
             )
         }
+
+    # ---------------------------------
+    # SAFE FAILURE RECOVERY
+    # ---------------------------------
+
+    def _retry_capability(
+        self,
+        step,
+        result
+    ):
+        """
+        Return the conservative capability name used
+        by ResiliencePolicy.
+
+        Only read-only/provider-generation operations
+        are eligible for automatic retries. Permission
+        pauses and state-changing operations never reach
+        the retry path.
+        """
+
+        step_type = step.get(
+            "type",
+            ""
+        )
+
+        action = step.get(
+            "action",
+            ""
+        )
+
+        if step_type == "provider":
+            return action
+
+        if step_type != "skill":
+            return None
+
+        if action == "providers":
+            return (
+                result.get(
+                    "capability"
+                )
+                or "generate_text"
+            )
+
+        if action == "research":
+            return "research"
+
+        if action == "web_search":
+            return "web_search"
+
+        return None
+
+    def _execute_with_recovery(
+        self,
+        workflow,
+        step
+    ):
+        """
+        Execute one workflow step and retry it at most
+        once when the shared resilience policy says the
+        failure is temporary and the capability is safe.
+
+        Permission-gated, destructive, and unknown
+        operations are never automatically retried.
+        """
+
+        first_result = self._execute_step(
+            workflow,
+            step
+        )
+
+        if first_result.get(
+            "paused"
+        ):
+            return first_result
+
+        if first_result.get(
+            "success",
+            False
+        ):
+            return first_result
+
+        failure_type = (
+            self.resilience.classify(
+                first_result
+            )
+        )
+
+        first_result[
+            "failure_type"
+        ] = failure_type
+
+        capability = (
+            self._retry_capability(
+                step,
+                first_result
+            )
+        )
+
+        can_retry = (
+            capability is not None
+            and self.resilience.can_retry(
+                capability,
+                first_result
+            )
+        )
+
+        if not can_retry:
+
+            first_result[
+                "recovery"
+            ] = {
+                "attempted": False,
+                "attempts": 1,
+                "retry_succeeded": False,
+                "capability": capability,
+                "failure_type": failure_type
+            }
+
+            return first_result
+
+        # Keep a durable record of the original failure
+        # before attempting the safe retry.
+        self.ledger.record(
+            workflow.workflow_id,
+            step,
+            result=first_result,
+            status="failed"
+        )
+
+        retry_result = self._execute_step(
+            workflow,
+            step
+        )
+
+        # A retry must never bypass a permission pause.
+        if retry_result.get(
+            "paused"
+        ):
+
+            retry_result[
+                "recovery"
+            ] = {
+                "attempted": True,
+                "attempts": 2,
+                "retry_succeeded": False,
+                "capability": capability,
+                "failure_type": failure_type,
+                "initial_error": (
+                    first_result.get(
+                        "error",
+                        ""
+                    )
+                )
+            }
+
+            return retry_result
+
+        retry_succeeded = bool(
+            retry_result.get(
+                "success",
+                False
+            )
+        )
+
+        retry_result[
+            "failure_type"
+        ] = (
+            "success"
+            if retry_succeeded
+            else self.resilience.classify(
+                retry_result
+            )
+        )
+
+        retry_result[
+            "recovery"
+        ] = {
+            "attempted": True,
+            "attempts": 2,
+            "retry_succeeded": (
+                retry_succeeded
+            ),
+            "capability": capability,
+            "failure_type": failure_type,
+            "initial_error": (
+                first_result.get(
+                    "error",
+                    ""
+                )
+            ),
+            "retry_error": (
+                None
+                if retry_succeeded
+                else retry_result.get(
+                    "error",
+                    ""
+                )
+            )
+        }
+
+        return retry_result
 
     # ---------------------------------
     # EXECUTE STEP
