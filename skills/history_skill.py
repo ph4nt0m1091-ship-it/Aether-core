@@ -65,6 +65,13 @@ class HistorySkill:
             "failure memory"
         }
 
+        recovery_health_commands = {
+            "show recovery health",
+            "recovery health",
+            "show workflow recovery health",
+            "workflow recovery health"
+        }
+
         if lower in recent_commands:
 
             return self._recent_history()
@@ -80,6 +87,10 @@ class HistorySkill:
         if lower in failure_commands:
 
             return self._failure_patterns()
+
+        if lower in recovery_health_commands:
+
+            return self._recovery_health()
 
         return None
 
@@ -399,6 +410,79 @@ class HistorySkill:
             output += "\n"
 
         return output.rstrip()
+
+    # ---------------------------------
+    # RECOVERY HEALTH
+    # ---------------------------------
+
+    def _recovery_health(
+        self,
+        limit=50
+    ):
+
+        recoveries = self.failure_memory.recent_recoveries(
+            limit=limit
+        )
+
+        failures = self.failure_memory.recent_failures(
+            limit=limit
+        )
+
+        patterns = self.failure_memory.repeated_patterns(
+            minimum_count=2,
+            limit=10
+        )
+
+        retry_successes = sum(
+            1
+            for item in recoveries
+            if isinstance(item, dict)
+            and item.get("retry_succeeded")
+        )
+
+        fallback_successes = sum(
+            1
+            for item in recoveries
+            if isinstance(item, dict)
+            and item.get("fallback_succeeded")
+        )
+
+        adaptive_candidates = sum(
+            1
+            for item in patterns
+            if int(item.get("count", 0) or 0) >= 3
+        )
+
+        output = (
+            "Aether: Recovery Health\n\n"
+            f"Recent failure events: {len(failures)}\n"
+            f"Recent successful recoveries: {len(recoveries)}\n"
+            f"Retry recoveries: {retry_successes}\n"
+            f"Local fallback recoveries: {fallback_successes}\n"
+            f"Recurring failure patterns: {len(patterns)}\n"
+            f"Patterns with 3+ occurrences: "
+            f"{adaptive_candidates}"
+        )
+
+        if not failures:
+            output += (
+                "\n\nStatus: No recent operational "
+                "failure activity."
+            )
+        elif recoveries:
+            output += (
+                "\n\nStatus: Recovery telemetry is "
+                "available and successful automatic "
+                "recoveries have been observed."
+            )
+        else:
+            output += (
+                "\n\nStatus: Failures are being observed, "
+                "but no successful automatic recoveries "
+                "are present in the recent recovery window."
+            )
+
+        return output
 
     # ---------------------------------
     # FAILURE PATTERNS

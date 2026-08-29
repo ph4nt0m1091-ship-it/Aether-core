@@ -6,6 +6,7 @@ from providers.aether_provider import AetherProvider
 from providers.local_system_provider import LocalSystemProvider
 from providers.provider_manager import ProviderManager
 
+from workflow_observer import WorkflowObserver
 from workflow_store import WorkflowStore
 
 
@@ -60,6 +61,10 @@ class WorkflowEngine:
 
         self.failure_memory = (
             FailureMemory()
+        )
+
+        self.observer = (
+            WorkflowObserver()
         )
 
     # ---------------------------------
@@ -121,23 +126,28 @@ class WorkflowEngine:
                     workflow
                 )
 
-                return {
-                    "success": True,
-                    "paused": True,
-                    "status": "paused",
-                    "progress": (
-                        workflow.progress()
-                    ),
-                    "permission_message": (
-                        result.get(
-                            "response",
-                            ""
-                        )
-                    ),
-                    "results": (
-                        workflow.results
+                return (
+                    self._with_observability(
+                        workflow,
+                        {
+                            "success": True,
+                            "paused": True,
+                            "status": "paused",
+                            "progress": (
+                                workflow.progress()
+                            ),
+                            "permission_message": (
+                                result.get(
+                                    "response",
+                                    ""
+                                )
+                            ),
+                            "results": (
+                                workflow.results
+                            )
+                        }
                     )
-                }
+                )
 
             workflow.add_result(
                 result
@@ -178,38 +188,43 @@ class WorkflowEngine:
                     workflow
                 )
 
-                return {
-                    "success": False,
-                    "paused": False,
-                    "status": "failed",
-                    "progress": (
-                        workflow.progress()
-                    ),
-                    "failed_step": (
-                        workflow.current_step
-                    ),
-                    "failure_type": (
-                        result.get(
-                            "failure_type",
-                            "unknown"
-                        )
-                    ),
-                    "recovery": (
-                        result.get(
-                            "recovery",
-                            {}
-                        )
-                    ),
-                    "error": (
-                        result.get(
-                            "error",
-                            "Unknown workflow error."
-                        )
-                    ),
-                    "results": (
-                        workflow.results
+                return (
+                    self._with_observability(
+                        workflow,
+{
+                            "success": False,
+                            "paused": False,
+                            "status": "failed",
+                            "progress": (
+                                workflow.progress()
+                            ),
+                            "failed_step": (
+                                workflow.current_step
+                            ),
+                            "failure_type": (
+                                result.get(
+                                    "failure_type",
+                                    "unknown"
+                                )
+                            ),
+                            "recovery": (
+                                result.get(
+                                    "recovery",
+                                    {}
+                                )
+                            ),
+                            "error": (
+                                result.get(
+                                    "error",
+                                    "Unknown workflow error."
+                                )
+                            ),
+                            "results": (
+                                workflow.results
+                            )
+                        }
                     )
-                }
+                )
 
         workflow.status = "completed"
 
@@ -219,15 +234,49 @@ class WorkflowEngine:
             workflow
         )
 
-        return {
-            "success": True,
-            "paused": False,
-            "status": "completed",
-            "progress": 100,
-            "results": (
-                workflow.results
+        return (
+            self._with_observability(
+                workflow,
+                {
+                    "success": True,
+                    "paused": False,
+                    "status": "completed",
+                    "progress": 100,
+                    "results": (
+                        workflow.results
+                    )
+                }
             )
-        }
+        )
+
+    # ---------------------------------
+    # WORKFLOW OBSERVABILITY
+    # ---------------------------------
+
+    def _with_observability(
+        self,
+        workflow,
+        result
+    ):
+        """
+        Attach read-only recovery telemetry to the
+        workflow result without changing execution.
+        """
+
+        if not isinstance(result, dict):
+            return result
+
+        result["observability"] = self.observer.snapshot(
+            workflow,
+            final_result=result
+        )
+
+        result["recovery_activity"] = self.observer.summary(
+            workflow,
+            final_result=result
+        )
+
+        return result
 
     # ---------------------------------
     # SAFE FAILURE RECOVERY
