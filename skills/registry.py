@@ -7,6 +7,7 @@ from skills.web_search_skill import WebSearchSkill
 from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
 from skills.history_skill import HistorySkill
+from skills.desktop_skill import DesktopSkill
 from skills.provider_skill import ProviderSkill
 from skills.agent_router_skill import AgentRouterSkill
 from skills.scheduler_skill import SchedulerSkill
@@ -72,6 +73,12 @@ class SkillRegistry:
             )
         )
 
+        self.desktop_skill = (
+            DesktopSkill(
+                memory
+            )
+        )
+
         self.terminal_skill = (
             TerminalSkill(
                 memory
@@ -86,12 +93,16 @@ class SkillRegistry:
             FileSkill(memory),
             WebSearchSkill(memory),
             ResearchSkill(memory),
+
+            # Low-risk desktop phrases must be checked before
+            # the broader SystemSkill open route so known folders
+            # such as "open my downloads" reach DesktopSkill.
+            self.desktop_skill,
+
             SystemSkill(memory),
             HistorySkill(memory),
 
-            # Cloud commands are explicit and
-            # privacy-gated before any future
-            # cloud provider receives data.
+            # Cloud commands are explicit and privacy-gated.
             self.cloud_side_mode_skill,
 
             self.agent_delegation_skill,
@@ -100,17 +111,13 @@ class SkillRegistry:
             self.scheduler_skill,
             self.runtime_skill,
 
-            # Workflow must come before any skill that
-            # can hold a permission request.
+            # Workflow must come before skills that can hold
+            # their own pending permission.
             self.workflow_skill,
 
             self.provider_skill,
             self.terminal_skill
         ]
-
-    # ---------------------------------
-    # CONNECT MANAGER
-    # ---------------------------------
 
     def connect_manager(
         self,
@@ -129,9 +136,9 @@ class SkillRegistry:
             skill_manager
         )
 
-    # ---------------------------------
-    # BACKGROUND SERVICES
-    # ---------------------------------
+        self.desktop_skill.connect(
+            skill_manager
+        )
 
     def start_background_services(
         self
@@ -145,10 +152,6 @@ class SkillRegistry:
 
         self.scheduler_skill.stop()
 
-    # ---------------------------------
-    # GET SKILL
-    # ---------------------------------
-
     def get_skill(
         self,
         name
@@ -161,10 +164,6 @@ class SkillRegistry:
                 return skill
 
         return None
-
-    # ---------------------------------
-    # HANDLE
-    # ---------------------------------
 
     def handle(
         self,
@@ -183,10 +182,6 @@ class SkillRegistry:
 
         return None
 
-    # ---------------------------------
-    # EXECUTE
-    # ---------------------------------
-
     def execute(
         self,
         step
@@ -204,10 +199,6 @@ class SkillRegistry:
             step
         )
 
-    # ---------------------------------
-    # AVAILABLE SKILLS
-    # ---------------------------------
-
     def available_skills(
         self
     ):
@@ -216,10 +207,6 @@ class SkillRegistry:
             skill.name
             for skill in self.skills
         ]
-
-    # ---------------------------------
-    # DESCRIPTIONS
-    # ---------------------------------
 
     def describe_skills(
         self
