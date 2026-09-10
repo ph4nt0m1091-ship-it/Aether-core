@@ -5,6 +5,8 @@ class DesktopSkill:
     DesktopSkill intentionally stays low risk:
     - inspect visible application windows
     - check whether an approved app is running
+    - inspect visible windows for an approved app
+    - focus an approved running app
     - open approved user folders
 
     It does not click, type, close processes, delete files,
@@ -62,6 +64,22 @@ class DesktopSkill:
         self.last_execution_result = result
         return result
 
+
+    def _approved_app(self, app_name):
+        provider = self._provider()
+
+        if provider is None:
+            return None
+
+        normalized = provider._normalize_app_name(
+            app_name
+        )
+
+        if normalized not in provider.APP_ALIASES:
+            return None
+
+        return normalized
+
     def handle(self, message):
         text = str(message or "").strip()
         lower = text.lower()
@@ -107,21 +125,72 @@ class DesktopSkill:
                 if not app_name:
                     return None
 
-                provider = self._provider()
-
-                if provider is None:
-                    return None
-
-                normalized = provider._normalize_app_name(
+                approved = self._approved_app(
                     app_name
                 )
 
-                if normalized not in provider.APP_ALIASES:
+                if approved is None:
                     return None
 
                 return self._show_app_running(
-                    normalized
+                    approved
                 )
+
+
+        window_prefixes = (
+            "show windows for ",
+            "list windows for ",
+            "show open windows for ",
+            "what windows does "
+        )
+
+        for prefix in window_prefixes:
+            if not lower.startswith(prefix):
+                continue
+
+            app_name = text[len(prefix):].strip()
+
+            if prefix == "what windows does ":
+                suffix = " have open"
+                if app_name.lower().endswith(suffix):
+                    app_name = app_name[:-len(suffix)].strip()
+
+            approved = self._approved_app(
+                app_name
+            )
+
+            if approved is None:
+                return None
+
+            return self._show_app_windows(
+                approved
+            )
+
+        focus_prefixes = (
+            "focus ",
+            "focus on ",
+            "bring up ",
+            "bring forward ",
+            "bring to front ",
+            "switch to "
+        )
+
+        for prefix in focus_prefixes:
+            if not lower.startswith(prefix):
+                continue
+
+            app_name = text[len(prefix):].strip()
+
+            approved = self._approved_app(
+                app_name
+            )
+
+            if approved is None:
+                return None
+
+            return self._focus_app(
+                approved
+            )
 
         folder_phrases = {
             "open desktop": "desktop",
@@ -252,6 +321,77 @@ class DesktopSkill:
         return (
             "Aether: No — "
             f"{app_name} is not running."
+        )
+
+
+    def _show_app_windows(self, app_name):
+        result = self._execute(
+            "list_app_windows",
+            {
+                "app": app_name
+            }
+        )
+
+        if not result.get("success"):
+            return (
+                "Aether: I couldn't inspect windows for "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        windows = result.get(
+            "windows",
+            []
+        )
+
+        if not windows:
+            return (
+                "Aether: "
+                f"{app_name} has no visible windows."
+            )
+
+        output = (
+            "Aether: Windows for "
+            f"{app_name}\n\n"
+        )
+
+        for item in windows[:20]:
+            output += (
+                f"- {item.get('title', '')} "
+                f"(PID {item.get('pid', '')})\n"
+            )
+
+        return output.rstrip()
+
+    def _focus_app(self, app_name):
+        result = self._execute(
+            "focus_app",
+            {
+                "app": app_name
+            }
+        )
+
+        if not result.get("success"):
+            return (
+                "Aether: I couldn't focus "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        title = str(
+            result.get("title", "") or ""
+        ).strip()
+
+        if title:
+            return (
+                "Aether: Brought "
+                f"{app_name} to the foreground.\n"
+                f"Window: {title}"
+            )
+
+        return (
+            "Aether: Brought "
+            f"{app_name} to the foreground."
         )
 
     def _open_known_folder(self, folder_name):

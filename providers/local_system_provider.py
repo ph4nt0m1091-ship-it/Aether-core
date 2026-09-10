@@ -91,6 +91,8 @@ class LocalSystemProvider(BaseProvider):
             "list_processes",
             "list_windows",
             "is_app_running",
+            "list_app_windows",
+            "focus_app",
             "run_command"
         ]
 
@@ -107,6 +109,10 @@ class LocalSystemProvider(BaseProvider):
             return self._list_windows()
         if capability == "is_app_running":
             return self._is_app_running(task)
+        if capability == "list_app_windows":
+            return self._list_app_windows(task)
+        if capability == "focus_app":
+            return self._focus_app(task)
         if capability == "run_command":
             return self._run_command(task)
         return {
@@ -426,6 +432,151 @@ class LocalSystemProvider(BaseProvider):
             "application": app_name,
             "running": bool(matches),
             "matches": matches
+        }
+
+
+    def _list_app_windows(self, task):
+        if isinstance(task, dict):
+            app_name = task.get("app", "")
+        else:
+            app_name = str(task)
+
+        app_name = self._normalize_app_name(app_name)
+        executable = self.APP_ALIASES.get(app_name)
+
+        if executable is None:
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        window_result = self._list_windows()
+
+        if not window_result.get("success"):
+            return window_result
+
+        expected_process = Path(executable).stem.lower()
+
+        matches = [
+            item
+            for item in window_result.get("windows", [])
+            if str(item.get("process", "")).lower()
+            == expected_process
+        ]
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "list_app_windows",
+            "application": app_name,
+            "count": len(matches),
+            "windows": matches
+        }
+
+    def _focus_app(self, task):
+        if isinstance(task, dict):
+            app_name = task.get("app", "")
+        else:
+            app_name = str(task)
+
+        app_name = self._normalize_app_name(app_name)
+
+        if app_name not in self.APP_ALIASES:
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        window_result = self._list_app_windows(
+            {"app": app_name}
+        )
+
+        if not window_result.get("success"):
+            return window_result
+
+        windows = window_result.get("windows", [])
+
+        if not windows:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "focus_app",
+                "application": app_name,
+                "error": (
+                    f'No visible window for "{app_name}" '
+                    "is currently available to focus."
+                )
+            }
+
+        pid = str(windows[0].get("pid", "")).strip()
+
+        if not pid.isdigit():
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "focus_app",
+                "application": app_name,
+                "error": "The target window PID was invalid."
+            }
+
+        script = (
+            "$shell = New-Object -ComObject WScript.Shell; "
+            f"$ok = $shell.AppActivate({pid}); "
+            "if ($ok) { exit 0 } else { exit 1 }"
+        )
+
+        try:
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    script
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=False
+            )
+        except (
+            OSError,
+            subprocess.SubprocessError
+        ) as error:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "focus_app",
+                "application": app_name,
+                "error": str(error)
+            }
+
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "focus_app",
+                "application": app_name,
+                "error": (
+                    f'Windows could not bring "{app_name}" '
+                    "to the foreground."
+                )
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "focus_app",
+            "application": app_name,
+            "pid": pid,
+            "title": windows[0].get("title", "")
         }
 
     def _run_command(self, task):
