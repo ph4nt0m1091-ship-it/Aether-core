@@ -70,6 +70,16 @@ class LocalSystemProvider(BaseProvider):
         "videos": Path.home() / "Videos"
     }
 
+    CLOSEABLE_APPS = {
+        "notepad",
+        "calculator",
+        "calc",
+        "paint",
+        "vscode",
+        "vs code",
+        "visual studio code"
+    }
+
     APPROVED_EXECUTABLES = {
         "git", "git.exe",
         "python", "python.exe",
@@ -93,6 +103,7 @@ class LocalSystemProvider(BaseProvider):
             "is_app_running",
             "list_app_windows",
             "focus_app",
+            "close_app",
             "run_command"
         ]
 
@@ -113,6 +124,8 @@ class LocalSystemProvider(BaseProvider):
             return self._list_app_windows(task)
         if capability == "focus_app":
             return self._focus_app(task)
+        if capability == "close_app":
+            return self._close_app(task)
         if capability == "run_command":
             return self._run_command(task)
         return {
@@ -577,6 +590,191 @@ class LocalSystemProvider(BaseProvider):
             "application": app_name,
             "pid": pid,
             "title": windows[0].get("title", "")
+        }
+
+
+    def _close_app(self, task):
+        """
+        Gracefully request that an approved application's
+        visible windows close.
+
+        This capability never force-kills a process.
+        The caller must explicitly provide permission_granted=True.
+        """
+
+        if isinstance(task, dict):
+            app_name = task.get("app", "")
+            permission_granted = (
+                task.get("permission_granted")
+                is True
+            )
+        else:
+            app_name = str(task)
+            permission_granted = False
+
+        app_name = self._normalize_app_name(app_name)
+
+        if app_name not in self.APP_ALIASES:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        if app_name not in self.CLOSEABLE_APPS:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "application": app_name,
+                "error": (
+                    f'Application "{app_name}" is not approved '
+                    "for graceful closing."
+                )
+            }
+
+        if not permission_granted:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "application": app_name,
+                "requires_permission": True,
+                "error": (
+                    "Explicit permission is required before "
+                    "closing an application."
+                )
+            }
+
+        window_result = self._list_app_windows(
+            {
+                "app": app_name
+            }
+        )
+
+        if not window_result.get("success"):
+            return window_result
+
+        windows = window_result.get(
+            "windows",
+            []
+        )
+
+        if not windows:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "application": app_name,
+                "error": (
+                    f'No visible window for "{app_name}" '
+                    "is currently available to close."
+                )
+            }
+
+        pids = []
+
+        for window in windows:
+            pid = str(
+                window.get(
+                    "pid",
+                    ""
+                )
+            ).strip()
+
+            if (
+                pid.isdigit()
+                and pid not in pids
+            ):
+                pids.append(
+                    pid
+                )
+
+        if not pids:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "application": app_name,
+                "error": (
+                    "No valid visible-window process IDs "
+                    "were available."
+                )
+            }
+
+        closed = []
+        refused = []
+
+        for pid in pids:
+            script = (
+                f"$p = Get-Process -Id {pid} "
+                "-ErrorAction SilentlyContinue; "
+                "if ($null -eq $p) { exit 2 }; "
+                "$ok = $p.CloseMainWindow(); "
+                "if ($ok) { exit 0 } else { exit 1 }"
+            )
+
+            try:
+                result = subprocess.run(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-Command",
+                        script
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    shell=False
+                )
+            except (
+                OSError,
+                subprocess.SubprocessError
+            ) as error:
+                return {
+                    "success": False,
+                    "provider": self.name,
+                    "capability": "close_app",
+                    "application": app_name,
+                    "error": str(
+                        error
+                    )
+                }
+
+            if result.returncode == 0:
+                closed.append(
+                    pid
+                )
+            else:
+                refused.append(
+                    pid
+                )
+
+        if not closed:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "close_app",
+                "application": app_name,
+                "error": (
+                    "Windows did not accept a graceful close "
+                    "request for the visible application window."
+                ),
+                "refused_pids": refused
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "close_app",
+            "application": app_name,
+            "closed_pids": closed,
+            "refused_pids": refused,
+            "forced": False
         }
 
     def _run_command(self, task):

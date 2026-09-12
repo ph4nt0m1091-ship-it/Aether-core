@@ -1,3 +1,8 @@
+import time
+
+from permissions.permission_manager import PermissionManager
+
+
 class DesktopSkill:
     """
     Safe natural-language desktop inspection and launching.
@@ -24,6 +29,7 @@ class DesktopSkill:
         self.memory = memory
         self.skill_manager = None
         self.last_execution_result = None
+        self.permissions = PermissionManager()
 
     def connect(self, skill_manager):
         self.skill_manager = skill_manager
@@ -86,6 +92,55 @@ class DesktopSkill:
 
         if not lower:
             return None
+
+        if self.permissions.has_pending():
+            response = (
+                self.permissions
+                .interpret_response(
+                    text
+                )
+            )
+
+            if response == "approve":
+                pending = (
+                    self.permissions
+                    .consume()
+                )
+
+                if pending.get("action") != "close_app":
+                    return (
+                        "Aether: Desktop action could not "
+                        "be resumed safely."
+                    )
+
+                app_name = (
+                    pending.get(
+                        "data",
+                        {}
+                    )
+                    .get(
+                        "app",
+                        ""
+                    )
+                )
+
+                return (
+                    self._close_app_approved(
+                        app_name
+                    )
+                )
+
+            if response == "deny":
+                self.permissions.cancel()
+
+                return (
+                    "Aether: Application close cancelled."
+                )
+
+            return (
+                "Aether: I am waiting for permission.\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
 
         if lower in (
             "show my open windows",
@@ -191,6 +246,102 @@ class DesktopSkill:
             return self._focus_app(
                 approved
             )
+
+
+        close_prefixes = (
+            "close ",
+            "quit ",
+            "exit app "
+        )
+
+        for prefix in close_prefixes:
+            if not lower.startswith(
+                prefix
+            ):
+                continue
+
+            app_name = (
+                text[
+                    len(prefix):
+                ]
+                .strip()
+                .rstrip("?")
+            )
+
+            approved = self._approved_app(
+                app_name
+            )
+
+            if approved is None:
+                return None
+
+            provider = self._provider()
+
+            if (
+                provider is None
+                or approved not in provider.CLOSEABLE_APPS
+            ):
+                return (
+                    "Aether: That application is not approved "
+                    "for graceful closing."
+                )
+
+            preview = None
+            windows = []
+
+            for attempt in range(4):
+                preview = (
+                    self._execute(
+                        "list_app_windows",
+                        {
+                            "app": approved
+                        }
+                    )
+                )
+
+                if not preview.get(
+                    "success"
+                ):
+                    return (
+                        "Aether: I couldn't inspect "
+                        f'"{approved}" before closing it.\n'
+                        f"{preview.get('error', '')}"
+                    ).rstrip()
+
+                windows = preview.get(
+                    "windows",
+                    []
+                )
+
+                if windows:
+                    break
+
+                if attempt < 3:
+                    time.sleep(0.35)
+
+            if not windows:
+                return (
+                    "Aether: "
+                    f"{approved} has no visible window to close."
+                )
+
+            self.permissions.request(
+                "close_app",
+                {
+                    "app": approved
+                }
+            )
+
+            output = (
+                "Aether: Permission required.\n\n"
+                f"Close application: {approved}\n"
+                f"Visible windows: {len(windows)}\n\n"
+                "Aether will request a normal graceful close. "
+                "It will not force-kill the process.\n\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
+
+            return output
 
         folder_phrases = {
             "open desktop": "desktop",
@@ -392,6 +543,52 @@ class DesktopSkill:
         return (
             "Aether: Brought "
             f"{app_name} to the foreground."
+        )
+
+
+    def _close_app_approved(
+        self,
+        app_name
+    ):
+
+        result = (
+            self._execute(
+                "close_app",
+                {
+                    "app": app_name,
+                    "permission_granted": True
+                }
+            )
+        )
+
+        if not result.get(
+            "success"
+        ):
+            return (
+                "Aether: I couldn't gracefully close "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        closed = result.get(
+            "closed_pids",
+            []
+        )
+
+        return (
+            "Aether: Graceful close requested for "
+            f"{app_name}.\n"
+            f"Window process"
+            + (
+                "es"
+                if len(closed) != 1
+                else ""
+            )
+            + ": "
+            + ", ".join(
+                str(pid)
+                for pid in closed
+            )
         )
 
     def _open_known_folder(self, folder_name):
