@@ -103,6 +103,9 @@ class LocalSystemProvider(BaseProvider):
             "is_app_running",
             "list_app_windows",
             "focus_app",
+            "minimize_app",
+            "maximize_app",
+            "restore_app",
             "close_app",
             "run_command"
         ]
@@ -124,6 +127,12 @@ class LocalSystemProvider(BaseProvider):
             return self._list_app_windows(task)
         if capability == "focus_app":
             return self._focus_app(task)
+        if capability == "minimize_app":
+            return self._set_window_state(task, "minimize")
+        if capability == "maximize_app":
+            return self._set_window_state(task, "maximize")
+        if capability == "restore_app":
+            return self._set_window_state(task, "restore")
         if capability == "close_app":
             return self._close_app(task)
         if capability == "run_command":
@@ -592,6 +601,117 @@ class LocalSystemProvider(BaseProvider):
             "title": windows[0].get("title", "")
         }
 
+
+
+    def _set_window_state(self, task, state):
+        """Change an approved visible app window state safely."""
+        if isinstance(task, dict):
+            app_name = task.get("app", "")
+        else:
+            app_name = str(task)
+
+        app_name = self._normalize_app_name(app_name)
+
+        if app_name not in self.APP_ALIASES:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": f"{state}_app",
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        show_codes = {
+            "minimize": 6,
+            "maximize": 3,
+            "restore": 9
+        }
+        show_code = show_codes.get(state)
+        if show_code is None:
+            return {
+                "success": False,
+                "provider": self.name,
+                "error": f'Unsupported window state: "{state}"'
+            }
+
+        window_result = self._list_app_windows({"app": app_name})
+        if not window_result.get("success"):
+            return window_result
+
+        windows = window_result.get("windows", [])
+        if not windows:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": f"{state}_app",
+                "application": app_name,
+                "error": (
+                    f'No visible window for "{app_name}" '
+                    f'is currently available to {state}.'
+                )
+            }
+
+        pid = str(windows[0].get("pid", "")).strip()
+        if not pid.isdigit():
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": f"{state}_app",
+                "application": app_name,
+                "error": "The target window PID was invalid."
+            }
+
+        script = (
+            "Add-Type -TypeDefinition '"
+            "using System; using System.Runtime.InteropServices; "
+            "public static class AetherWin32 { "
+            "[DllImport(\"user32.dll\")] "
+            "public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); "
+            "}'; "
+            f"$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { exit 2 }; "
+            "$h = $p.MainWindowHandle; if ($h -eq 0) { exit 3 }; "
+            f"$ok = [AetherWin32]::ShowWindow($h, {show_code}); "
+            "if ($ok) { exit 0 } else { exit 1 }"
+        )
+
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=False
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": f"{state}_app",
+                "application": app_name,
+                "error": str(error)
+            }
+
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": f"{state}_app",
+                "application": app_name,
+                "error": f'Windows could not {state} "{app_name}".'
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": f"{state}_app",
+            "application": app_name,
+            "pid": pid,
+            "title": windows[0].get("title", ""),
+            "state": state
+        }
 
     def _close_app(self, task):
         """

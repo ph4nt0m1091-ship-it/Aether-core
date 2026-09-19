@@ -248,6 +248,28 @@ class DesktopSkill:
             )
 
 
+
+        window_state_prefixes = {
+            "minimize ": "minimize_app",
+            "maximize ": "maximize_app",
+            "restore window ": "restore_app",
+            "restore ": "restore_app"
+        }
+
+        for prefix, capability in window_state_prefixes.items():
+            if not lower.startswith(prefix):
+                continue
+
+            app_name = text[len(prefix):].strip().rstrip("?")
+            approved = self._approved_app(app_name)
+            if approved is None:
+                return None
+
+            return self._change_window_state(
+                approved,
+                capability
+            )
+
         close_prefixes = (
             "close ",
             "quit ",
@@ -545,6 +567,42 @@ class DesktopSkill:
             f"{app_name} to the foreground."
         )
 
+
+
+    def _change_window_state(self, app_name, capability):
+        result = self._execute(
+            capability,
+            {"app": app_name}
+        )
+
+        action_names = {
+            "minimize_app": "minimize",
+            "maximize_app": "maximize",
+            "restore_app": "restore"
+        }
+        action = action_names.get(capability, "change")
+
+        if not result.get("success"):
+            return (
+                "Aether: I couldn't "
+                f'{action} "{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        phrase = {
+            "minimize": "Minimized",
+            "maximize": "Maximized",
+            "restore": "Restored"
+        }.get(action, "Updated")
+
+        title = str(result.get("title", "") or "").strip()
+        if title:
+            return (
+                f"Aether: {phrase} {app_name}.\n"
+                f"Window: {title}"
+            )
+
+        return f"Aether: {phrase} {app_name}."
 
     def _close_app_approved(
         self,
