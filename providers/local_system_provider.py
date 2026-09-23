@@ -1,4 +1,6 @@
 import csv
+import ctypes
+import time
 import io
 import json
 import os
@@ -70,6 +72,13 @@ class LocalSystemProvider(BaseProvider):
         "videos": Path.home() / "Videos"
     }
 
+    TEXT_INPUT_APPS = {
+        "notepad",
+        "vscode",
+        "vs code",
+        "visual studio code"
+    }
+
     CLOSEABLE_APPS = {
         "notepad",
         "calculator",
@@ -106,6 +115,7 @@ class LocalSystemProvider(BaseProvider):
             "minimize_app",
             "maximize_app",
             "restore_app",
+            "type_text",
             "close_app",
             "run_command"
         ]
@@ -133,6 +143,8 @@ class LocalSystemProvider(BaseProvider):
             return self._set_window_state(task, "maximize")
         if capability == "restore_app":
             return self._set_window_state(task, "restore")
+        if capability == "type_text":
+            return self._type_text(task)
         if capability == "close_app":
             return self._close_app(task)
         if capability == "run_command":
@@ -711,6 +723,273 @@ class LocalSystemProvider(BaseProvider):
             "pid": pid,
             "title": windows[0].get("title", ""),
             "state": state
+        }
+
+
+    def _type_text(self, task):
+        """
+        Type literal Unicode text into an approved visible app.
+
+        Safety boundaries:
+        - explicit permission_granted=True is required
+        - only approved text-input apps are allowed
+        - no Enter, Tab, control characters, or hotkeys
+        - maximum 500 characters
+        - text is emitted as Unicode key events, not shell input
+        """
+
+        if not isinstance(task, dict):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "error": "Text input requires a structured task."
+            }
+
+        app_name = self._normalize_app_name(
+            task.get("app", "")
+        )
+        text = str(
+            task.get("text", "")
+        )
+        permission_granted = (
+            task.get("permission_granted")
+            is True
+        )
+
+        if app_name not in self.APP_ALIASES:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        if app_name not in self.TEXT_INPUT_APPS:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": (
+                    f'Application "{app_name}" is not approved '
+                    "for text input."
+                )
+            }
+
+        if not permission_granted:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "requires_permission": True,
+                "error": (
+                    "Explicit permission is required before "
+                    "typing into an application."
+                )
+            }
+
+        if not text:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": "No text was provided."
+            }
+
+        if len(text) > 500:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": (
+                    "Text input is limited to 500 characters "
+                    "per action."
+                )
+            }
+
+        if any(
+            ord(character) < 32
+            or ord(character) == 127
+            for character in text
+        ):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": (
+                    "Control characters, newlines, tabs, and "
+                    "submit keys are not allowed."
+                )
+            }
+
+        focus_result = self._focus_app(
+            {
+                "app": app_name
+            }
+        )
+
+        if not focus_result.get(
+            "success"
+        ):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": (
+                    "The target app could not be focused safely. "
+                    f"{focus_result.get('error', '')}"
+                ).strip()
+            }
+
+        time.sleep(0.20)
+
+        try:
+            user32 = ctypes.windll.user32
+
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                ULONG_PTR = ctypes.c_ulonglong
+            else:
+                ULONG_PTR = ctypes.c_ulong
+
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", ctypes.wintypes.LONG),
+                    ("dy", ctypes.wintypes.LONG),
+                    ("mouseData", ctypes.wintypes.DWORD),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ULONG_PTR)
+                ]
+
+            class KEYBDINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("wVk", ctypes.wintypes.WORD),
+                    ("wScan", ctypes.wintypes.WORD),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ULONG_PTR)
+                ]
+
+            class HARDWAREINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("uMsg", ctypes.wintypes.DWORD),
+                    ("wParamL", ctypes.wintypes.WORD),
+                    ("wParamH", ctypes.wintypes.WORD)
+                ]
+
+            class INPUT_UNION(ctypes.Union):
+                _fields_ = [
+                    ("mi", MOUSEINPUT),
+                    ("ki", KEYBDINPUT),
+                    ("hi", HARDWAREINPUT)
+                ]
+
+            class INPUT(ctypes.Structure):
+                _anonymous_ = ("union",)
+                _fields_ = [
+                    ("type", ctypes.wintypes.DWORD),
+                    ("union", INPUT_UNION)
+                ]
+
+            input_keyboard = 1
+            keyeventf_keyup = 0x0002
+            keyeventf_unicode = 0x0004
+
+            utf16 = text.encode(
+                "utf-16-le"
+            )
+
+            for index in range(
+                0,
+                len(utf16),
+                2
+            ):
+                unit = int.from_bytes(
+                    utf16[
+                        index:index + 2
+                    ],
+                    "little"
+                )
+
+                events = (
+                    INPUT * 2
+                )(
+                    INPUT(
+                        type=input_keyboard,
+                        ki=KEYBDINPUT(
+                            0,
+                            unit,
+                            keyeventf_unicode,
+                            0,
+                            0
+                        )
+                    ),
+                    INPUT(
+                        type=input_keyboard,
+                        ki=KEYBDINPUT(
+                            0,
+                            unit,
+                            (
+                                keyeventf_unicode
+                                | keyeventf_keyup
+                            ),
+                            0,
+                            0
+                        )
+                    )
+                )
+
+                sent = user32.SendInput(
+                    2,
+                    events,
+                    ctypes.sizeof(INPUT)
+                )
+
+                if sent != 2:
+                    return {
+                        "success": False,
+                        "provider": self.name,
+                        "capability": "type_text",
+                        "application": app_name,
+                        "error": (
+                            "Windows did not accept all "
+                            "text input events."
+                        )
+                    }
+
+        except (
+            AttributeError,
+            OSError,
+            ValueError
+        ) as error:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "type_text",
+                "application": app_name,
+                "error": str(
+                    error
+                )
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "type_text",
+            "application": app_name,
+            "characters": len(
+                text
+            ),
+            "submitted": False
         }
 
     def _close_app(self, task):

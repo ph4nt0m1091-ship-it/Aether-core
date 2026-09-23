@@ -965,6 +965,19 @@ class Brain:
 
         if intent == "capability_request":
 
+            # Registered deterministic skills get first chance
+            # to satisfy capability-style requests. Skill Lab
+            # records a gap only when no real skill claims it.
+            response = (
+                self.skill_manager
+                .handle(
+                    message
+                )
+            )
+
+            if response is not None:
+                return response
+
             capability = "unknown"
 
             if (

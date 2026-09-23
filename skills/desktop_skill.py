@@ -14,8 +14,9 @@ class DesktopSkill:
     - focus an approved running app
     - open approved user folders
 
-    It does not click, type, close processes, delete files,
-    or execute arbitrary commands.
+    It does not click arbitrary coordinates, send hotkeys,
+    force-kill processes, delete files, or execute arbitrary commands.
+    Text input is explicit, permission-gated, and never auto-submits.
     """
 
     name = "desktop"
@@ -107,34 +108,51 @@ class DesktopSkill:
                     .consume()
                 )
 
-                if pending.get("action") != "close_app":
-                    return (
-                        "Aether: Desktop action could not "
-                        "be resumed safely."
-                    )
-
-                app_name = (
-                    pending.get(
-                        "data",
-                        {}
-                    )
-                    .get(
-                        "app",
-                        ""
-                    )
+                action = pending.get(
+                    "action"
+                )
+                data = pending.get(
+                    "data",
+                    {}
                 )
 
-                return (
-                    self._close_app_approved(
-                        app_name
+                if action == "close_app":
+                    return (
+                        self._close_app_approved(
+                            data.get(
+                                "app",
+                                ""
+                            )
+                        )
                     )
+
+                if action == "type_text":
+                    return (
+                        self._type_text_approved(
+                            data.get(
+                                "app",
+                                ""
+                            ),
+                            data.get(
+                                "text",
+                                ""
+                            )
+                        )
+                    )
+
+                return (
+                    "Aether: Desktop action could not "
+                    "be resumed safely."
                 )
 
             if response == "deny":
-                self.permissions.cancel()
+                pending = (
+                    self.permissions
+                    .cancel()
+                )
 
                 return (
-                    "Aether: Application close cancelled."
+                    "Aether: Desktop action cancelled."
                 )
 
             return (
@@ -248,6 +266,156 @@ class DesktopSkill:
             )
 
 
+
+
+        type_prefixes = (
+            "type ",
+            "write "
+        )
+
+        for prefix in type_prefixes:
+            if not lower.startswith(
+                prefix
+            ):
+                continue
+
+            body = text[
+                len(prefix):
+            ].strip()
+
+            split_markers = (
+                " into ",
+                " in "
+            )
+
+            content = None
+            app_name = None
+
+            for marker in split_markers:
+                left, found, right = (
+                    body.rpartition(
+                        marker
+                    )
+                )
+
+                if (
+                    found
+                    and left.strip()
+                    and right.strip()
+                ):
+                    content = left.strip()
+                    app_name = right.strip()
+                    break
+
+            if (
+                content is None
+                or app_name is None
+            ):
+                continue
+
+            if (
+                len(content) >= 2
+                and content[0] == content[-1]
+                and content[0] in (
+                    '"',
+                    "'"
+                )
+            ):
+                content = content[1:-1]
+
+            approved = self._approved_app(
+                app_name
+            )
+
+            if approved is None:
+                return None
+
+            provider = self._provider()
+
+            if (
+                provider is None
+                or approved not in provider.TEXT_INPUT_APPS
+            ):
+                return (
+                    "Aether: That application is not approved "
+                    "for text input."
+                )
+
+            if not content:
+                return (
+                    "Aether: No text was provided."
+                )
+
+            if len(content) > 500:
+                return (
+                    "Aether: Text input is limited to "
+                    "500 characters per action."
+                )
+
+            if any(
+                ord(character) < 32
+                or ord(character) == 127
+                for character in content
+            ):
+                return (
+                    "Aether: Control characters, newlines, "
+                    "tabs, and submit keys are not allowed."
+                )
+
+            preview_result = (
+                self._execute(
+                    "list_app_windows",
+                    {
+                        "app": approved
+                    }
+                )
+            )
+
+            if not preview_result.get(
+                "success"
+            ):
+                return (
+                    "Aether: I couldn't inspect "
+                    f'"{approved}" before typing.\n'
+                    f"{preview_result.get('error', '')}"
+                ).rstrip()
+
+            if not preview_result.get(
+                "windows",
+                []
+            ):
+                return (
+                    "Aether: "
+                    f"{approved} has no visible window "
+                    "available for text input."
+                )
+
+            self.permissions.request(
+                "type_text",
+                {
+                    "app": approved,
+                    "text": content
+                }
+            )
+
+            preview = content
+
+            if len(preview) > 120:
+                preview = (
+                    preview[:117]
+                    + "..."
+                )
+
+            return (
+                "Aether: Permission required.\n\n"
+                f"Type into: {approved}\n"
+                f"Characters: {len(content)}\n"
+                f"Preview: {preview}\n\n"
+                "Aether will type literal text only. "
+                "It will not press Enter, submit, or send "
+                "hotkeys.\n\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
 
         window_state_prefixes = {
             "minimize ": "minimize_app",
@@ -568,6 +736,37 @@ class DesktopSkill:
         )
 
 
+
+
+    def _type_text_approved(
+        self,
+        app_name,
+        text
+    ):
+        result = self._execute(
+            "type_text",
+            {
+                "app": app_name,
+                "text": text,
+                "permission_granted": True
+            }
+        )
+
+        if not result.get(
+            "success"
+        ):
+            return (
+                "Aether: I couldn't type into "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        return (
+            "Aether: Typed "
+            f"{result.get('characters', len(text))} "
+            f"characters into {app_name}.\n"
+            "No submit key was sent."
+        )
 
     def _change_window_state(self, app_name, capability):
         result = self._execute(
