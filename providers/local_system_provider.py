@@ -79,6 +79,14 @@ class LocalSystemProvider(BaseProvider):
         "visual studio code"
     }
 
+    KEY_ALIASES = {
+        "enter": 0x0D,
+        "return": 0x0D,
+        "escape": 0x1B,
+        "esc": 0x1B,
+        "tab": 0x09
+    }
+
     CLOSEABLE_APPS = {
         "notepad",
         "calculator",
@@ -116,6 +124,7 @@ class LocalSystemProvider(BaseProvider):
             "maximize_app",
             "restore_app",
             "type_text",
+            "press_key",
             "close_app",
             "run_command"
         ]
@@ -145,6 +154,8 @@ class LocalSystemProvider(BaseProvider):
             return self._set_window_state(task, "restore")
         if capability == "type_text":
             return self._type_text(task)
+        if capability == "press_key":
+            return self._press_key(task)
         if capability == "close_app":
             return self._close_app(task)
         if capability == "run_command":
@@ -990,6 +1001,232 @@ class LocalSystemProvider(BaseProvider):
                 text
             ),
             "submitted": False
+        }
+
+
+    def _press_key(self, task):
+        """
+        Send one approved key to one approved visible text app.
+
+        Safety boundaries:
+        - explicit permission_granted=True is required
+        - only TEXT_INPUT_APPS are allowed
+        - only a tiny allowlist of single keys is supported
+        - no modifiers, hotkeys, Windows key, or function keys
+        """
+
+        if not isinstance(task, dict):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "error": "Key input requires a structured task."
+            }
+
+        app_name = self._normalize_app_name(
+            task.get("app", "")
+        )
+        key_name = str(
+            task.get("key", "")
+        ).strip().lower()
+
+        permission_granted = (
+            task.get("permission_granted")
+            is True
+        )
+
+        if app_name not in self.APP_ALIASES:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        if app_name not in self.TEXT_INPUT_APPS:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "application": app_name,
+                "error": (
+                    f'Application "{app_name}" is not approved '
+                    "for key input."
+                )
+            }
+
+        virtual_key = self.KEY_ALIASES.get(
+            key_name
+        )
+
+        if virtual_key is None:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "application": app_name,
+                "error": (
+                    f'Key "{key_name}" is not in the approved '
+                    "single-key list."
+                )
+            }
+
+        if not permission_granted:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "application": app_name,
+                "key": key_name,
+                "requires_permission": True,
+                "error": (
+                    "Explicit permission is required before "
+                    "sending a key to an application."
+                )
+            }
+
+        focus_result = self._focus_app(
+            {
+                "app": app_name
+            }
+        )
+
+        if not focus_result.get(
+            "success"
+        ):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "application": app_name,
+                "key": key_name,
+                "error": (
+                    "The target app could not be focused safely. "
+                    f"{focus_result.get('error', '')}"
+                ).strip()
+            }
+
+        time.sleep(0.20)
+
+        try:
+            user32 = ctypes.windll.user32
+
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                ULONG_PTR = ctypes.c_ulonglong
+            else:
+                ULONG_PTR = ctypes.c_ulong
+
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", ctypes.wintypes.LONG),
+                    ("dy", ctypes.wintypes.LONG),
+                    ("mouseData", ctypes.wintypes.DWORD),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ULONG_PTR)
+                ]
+
+            class KEYBDINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("wVk", ctypes.wintypes.WORD),
+                    ("wScan", ctypes.wintypes.WORD),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ULONG_PTR)
+                ]
+
+            class HARDWAREINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("uMsg", ctypes.wintypes.DWORD),
+                    ("wParamL", ctypes.wintypes.WORD),
+                    ("wParamH", ctypes.wintypes.WORD)
+                ]
+
+            class INPUT_UNION(ctypes.Union):
+                _fields_ = [
+                    ("mi", MOUSEINPUT),
+                    ("ki", KEYBDINPUT),
+                    ("hi", HARDWAREINPUT)
+                ]
+
+            class INPUT(ctypes.Structure):
+                _anonymous_ = ("union",)
+                _fields_ = [
+                    ("type", ctypes.wintypes.DWORD),
+                    ("union", INPUT_UNION)
+                ]
+
+            input_keyboard = 1
+            keyeventf_keyup = 0x0002
+
+            events = (
+                INPUT * 2
+            )(
+                INPUT(
+                    type=input_keyboard,
+                    ki=KEYBDINPUT(
+                        virtual_key,
+                        0,
+                        0,
+                        0,
+                        0
+                    )
+                ),
+                INPUT(
+                    type=input_keyboard,
+                    ki=KEYBDINPUT(
+                        virtual_key,
+                        0,
+                        keyeventf_keyup,
+                        0,
+                        0
+                    )
+                )
+            )
+
+            sent = user32.SendInput(
+                2,
+                events,
+                ctypes.sizeof(INPUT)
+            )
+
+            if sent != 2:
+                return {
+                    "success": False,
+                    "provider": self.name,
+                    "capability": "press_key",
+                    "application": app_name,
+                    "key": key_name,
+                    "error": (
+                        "Windows did not accept the key input."
+                    )
+                }
+
+        except (
+            AttributeError,
+            OSError,
+            ValueError
+        ) as error:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "press_key",
+                "application": app_name,
+                "key": key_name,
+                "error": str(
+                    error
+                )
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "press_key",
+            "application": app_name,
+            "key": key_name
         }
 
     def _close_app(self, task):

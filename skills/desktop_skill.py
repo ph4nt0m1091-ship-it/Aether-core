@@ -140,6 +140,20 @@ class DesktopSkill:
                         )
                     )
 
+                if action == "press_key":
+                    return (
+                        self._press_key_approved(
+                            data.get(
+                                "app",
+                                ""
+                            ),
+                            data.get(
+                                "key",
+                                ""
+                            )
+                        )
+                    )
+
                 return (
                     "Aether: Desktop action could not "
                     "be resumed safely."
@@ -267,6 +281,103 @@ class DesktopSkill:
 
 
 
+
+
+        key_prefixes = (
+            "press ",
+            "hit "
+        )
+
+        for prefix in key_prefixes:
+            if not lower.startswith(
+                prefix
+            ):
+                continue
+
+            body = text[
+                len(prefix):
+            ].strip()
+
+            left, found, right = (
+                body.rpartition(
+                    " in "
+                )
+            )
+
+            if not found:
+                continue
+
+            key_name = left.strip().lower()
+            app_name = right.strip()
+
+            approved = self._approved_app(
+                app_name
+            )
+
+            if approved is None:
+                return None
+
+            provider = self._provider()
+
+            if (
+                provider is None
+                or approved not in provider.TEXT_INPUT_APPS
+            ):
+                return (
+                    "Aether: That application is not approved "
+                    "for key input."
+                )
+
+            if key_name not in provider.KEY_ALIASES:
+                return (
+                    "Aether: That key is not approved. "
+                    "Allowed keys are Enter, Escape, and Tab."
+                )
+
+            preview_result = (
+                self._execute(
+                    "list_app_windows",
+                    {
+                        "app": approved
+                    }
+                )
+            )
+
+            if not preview_result.get(
+                "success"
+            ):
+                return (
+                    "Aether: I couldn't inspect "
+                    f'"{approved}" before sending the key.\n'
+                    f"{preview_result.get('error', '')}"
+                ).rstrip()
+
+            if not preview_result.get(
+                "windows",
+                []
+            ):
+                return (
+                    "Aether: "
+                    f"{approved} has no visible window "
+                    "available for key input."
+                )
+
+            self.permissions.request(
+                "press_key",
+                {
+                    "app": approved,
+                    "key": key_name
+                }
+            )
+
+            return (
+                "Aether: Permission required.\n\n"
+                f"Send key: {key_name}\n"
+                f"Target app: {approved}\n\n"
+                "Aether will send one approved key only. "
+                "No modifier keys or hotkeys will be sent.\n\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
 
         type_prefixes = (
             "type ",
@@ -737,6 +848,35 @@ class DesktopSkill:
 
 
 
+
+
+    def _press_key_approved(
+        self,
+        app_name,
+        key_name
+    ):
+        result = self._execute(
+            "press_key",
+            {
+                "app": app_name,
+                "key": key_name,
+                "permission_granted": True
+            }
+        )
+
+        if not result.get(
+            "success"
+        ):
+            return (
+                "Aether: I couldn't send "
+                f'"{key_name}" to "{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        return (
+            "Aether: Sent "
+            f"{key_name} to {app_name}."
+        )
 
     def _type_text_approved(
         self,
