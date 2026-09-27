@@ -4,6 +4,7 @@ from skills.time_skill import TimeSkill
 from skills.calculator_skill import CalculatorSkill
 from skills.file_skill import FileSkill
 from skills.web_search_skill import WebSearchSkill
+from skills.browser_skill import BrowserSkill
 from skills.research_skill import ResearchSkill
 from skills.system_skill import SystemSkill
 from skills.history_skill import HistorySkill
@@ -73,6 +74,12 @@ class SkillRegistry:
             )
         )
 
+        self.browser_skill = (
+            BrowserSkill(
+                memory
+            )
+        )
+
         self.desktop_skill = (
             DesktopSkill(
                 memory
@@ -91,6 +98,12 @@ class SkillRegistry:
             TimeSkill(memory),
             CalculatorSkill(memory),
             FileSkill(memory),
+
+            # Browser automation is separate from web search.
+            # It controls a local Chromium page using DOM
+            # targets instead of screen coordinates.
+            self.browser_skill,
+
             WebSearchSkill(memory),
             ResearchSkill(memory),
 
