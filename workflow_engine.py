@@ -1405,6 +1405,38 @@ class WorkflowEngine:
                     }
 
             # ---------------------------------
+            # DESKTOP PERMISSION
+            # ---------------------------------
+
+            if action == "desktop":
+
+                desktop_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "desktop"
+                    )
+                )
+
+                if (
+                    desktop_skill is not None
+                    and desktop_skill
+                    .permissions
+                    .has_pending()
+                ):
+
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "type": "skill",
+                        "action": action,
+                        "permission_source": (
+                            "desktop"
+                        ),
+                        "response": response
+                    }
+
+            # ---------------------------------
             # RESEARCH STRUCTURED RESULT
             # ---------------------------------
 

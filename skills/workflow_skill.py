@@ -310,6 +310,14 @@ class WorkflowSkill:
             )
         )
 
+        desktop_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "desktop"
+            )
+        )
+
         if (
             terminal_skill is not None
             and terminal_skill
@@ -332,6 +340,18 @@ class WorkflowSkill:
             return (
                 "providers",
                 provider_skill
+            )
+
+        if (
+            desktop_skill is not None
+            and desktop_skill
+            .permissions
+            .has_pending()
+        ):
+
+            return (
+                "desktop",
+                desktop_skill
             )
 
         return (
@@ -416,6 +436,13 @@ class WorkflowSkill:
                     "Aether: External agent "
                     "execution cancelled."
                 )
+            )
+
+        elif permission_source == "desktop":
+
+            denied = (
+                permission_response
+                == "Aether: Desktop action cancelled."
             )
 
         if denied:
@@ -665,6 +692,27 @@ class WorkflowSkill:
                 }
             )
 
+        # ---------------------------------
+        # DESKTOP RESULT
+        # ---------------------------------
+
+        elif permission_source == "desktop":
+
+            workflow.add_result(
+                {
+                    "success": True,
+                    "paused": False,
+                    "type": "skill",
+                    "action": "desktop",
+                    "response": (
+                        permission_response
+                    ),
+                    "output": (
+                        permission_response
+                    )
+                }
+            )
+
         self.engine.store.save(
             workflow
         )
@@ -801,6 +849,14 @@ class WorkflowSkill:
             )
         )
 
+        desktop_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "desktop"
+            )
+        )
+
         if terminal_skill is not None:
 
             terminal_skill.permissions.cancel()
@@ -808,6 +864,10 @@ class WorkflowSkill:
         if provider_skill is not None:
 
             provider_skill.permissions.cancel()
+
+        if desktop_skill is not None:
+
+            desktop_skill.permissions.cancel()
 
         workflow.status = (
             "cancelled"
@@ -1152,6 +1212,77 @@ class WorkflowSkill:
                         "message": (
                             search_message
                         )
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # DESKTOP ACTION
+            # -------------------------
+
+            desktop_request = (
+                lower.startswith(
+                    "show controls in "
+                )
+                or lower.startswith(
+                    "list controls in "
+                )
+                or lower.startswith(
+                    "click "
+                )
+                or lower.startswith(
+                    "activate "
+                )
+                or lower.startswith(
+                    "type "
+                )
+                or lower.startswith(
+                    "press "
+                )
+                or lower.startswith(
+                    "focus "
+                )
+                or lower.startswith(
+                    "switch to "
+                )
+                or lower.startswith(
+                    "bring up "
+                )
+                or lower.startswith(
+                    "close "
+                )
+                or lower.startswith(
+                    "minimize "
+                )
+                or lower.startswith(
+                    "maximize "
+                )
+                or lower.startswith(
+                    "restore "
+                )
+                or lower in (
+                    "show my open windows",
+                    "show open windows",
+                    "what apps are open"
+                )
+                or (
+                    lower.startswith(
+                        "is "
+                    )
+                    and lower.endswith(
+                        " running"
+                    )
+                )
+            )
+
+            if desktop_request:
+
+                workflow.add_step(
+                    "skill",
+                    "desktop",
+                    {
+                        "message": part
                     }
                 )
 
