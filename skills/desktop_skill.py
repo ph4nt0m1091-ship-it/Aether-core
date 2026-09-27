@@ -154,6 +154,20 @@ class DesktopSkill:
                         )
                     )
 
+                if action == "invoke_control":
+                    return (
+                        self._invoke_control_approved(
+                            data.get(
+                                "app",
+                                ""
+                            ),
+                            data.get(
+                                "control",
+                                ""
+                            )
+                        )
+                    )
+
                 return (
                     "Aether: Desktop action could not "
                     "be resumed safely."
@@ -376,6 +390,121 @@ class DesktopSkill:
                 f"Target app: {approved}\n\n"
                 "Aether will send one approved key only. "
                 "No modifier keys or hotkeys will be sent.\n\n"
+                'Say "yes" to approve or "no" to cancel.'
+            )
+
+
+        control_list_prefixes = (
+            "show controls in ",
+            "list controls in ",
+            "show buttons in ",
+            "list buttons in "
+        )
+
+        for prefix in control_list_prefixes:
+            if not lower.startswith(prefix):
+                continue
+
+            app_name = text[len(prefix):].strip()
+
+            approved = self._approved_app(app_name)
+
+            if approved is None:
+                return None
+
+            return self._show_controls(approved)
+
+        invoke_prefixes = (
+            "click ",
+            "activate "
+        )
+
+        for prefix in invoke_prefixes:
+            if not lower.startswith(prefix):
+                continue
+
+            body = text[len(prefix):].strip()
+            control, found, app_name = body.rpartition(" in ")
+
+            if not found:
+                continue
+
+            control = control.strip()
+            app_name = app_name.strip()
+
+            if (
+                len(control) >= 2
+                and control[0] == control[-1]
+                and control[0] in ('"', "'")
+            ):
+                control = control[1:-1]
+
+            approved = self._approved_app(app_name)
+
+            if approved is None:
+                return None
+
+            provider = self._provider()
+
+            if (
+                provider is None
+                or approved not in provider.UI_CONTROL_APPS
+            ):
+                return (
+                    "Aether: That application is not approved "
+                    "for UI control targeting."
+                )
+
+            result = self._execute(
+                "list_controls",
+                {"app": approved}
+            )
+
+            if not result.get("success"):
+                return (
+                    "Aether: I couldn't inspect controls in "
+                    f'"{approved}".\n'
+                    f"{result.get('error', '')}"
+                ).rstrip()
+
+            key = control.lower()
+
+            matches = [
+                item
+                for item in result.get("controls", [])
+                if (
+                    str(item.get("name", "")).strip().lower() == key
+                    or str(
+                        item.get("automation_id", "")
+                    ).strip().lower() == key
+                )
+            ]
+
+            enabled = [
+                item for item in matches
+                if item.get("enabled")
+            ]
+
+            if len(enabled) != 1:
+                return (
+                    "Aether: I couldn't find exactly one enabled "
+                    f'control named "{control}". I will not guess.'
+                )
+
+            self.permissions.request(
+                "invoke_control",
+                {
+                    "app": approved,
+                    "control": control
+                }
+            )
+
+            return (
+                "Aether: Permission required.\n\n"
+                f"Invoke control: {control}\n"
+                f"Target app: {approved}\n\n"
+                "Aether will activate this exact named UI control. "
+                "It will not use blind screen coordinates.\n\n"
                 'Say "yes" to approve or "no" to cancel.'
             )
 
@@ -876,6 +1005,82 @@ class DesktopSkill:
         return (
             "Aether: Sent "
             f"{key_name} to {app_name}."
+        )
+
+
+    def _show_controls(self, app_name):
+        result = self._execute(
+            "list_controls",
+            {"app": app_name}
+        )
+
+        if not result.get("success"):
+            return (
+                "Aether: I couldn't inspect controls in "
+                f'"{app_name}".\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        controls = result.get("controls", [])
+
+        if not controls:
+            return (
+                "Aether: No named UI controls were found in "
+                f"{app_name}."
+            )
+
+        output = f"Aether: Controls in {app_name}\n\n"
+        shown = 0
+
+        for item in controls:
+            label = (
+                str(item.get("name", "") or "").strip()
+                or str(
+                    item.get("automation_id", "") or ""
+                ).strip()
+            )
+
+            if not label:
+                continue
+
+            output += (
+                f"- {label}"
+                f" | {item.get('control_type', '')}"
+                f" | enabled={item.get('enabled')}\n"
+            )
+
+            shown += 1
+
+            if shown >= 35:
+                break
+
+        return output.rstrip()
+
+    def _invoke_control_approved(
+        self,
+        app_name,
+        control
+    ):
+        result = self._execute(
+            "invoke_control",
+            {
+                "app": app_name,
+                "control": control,
+                "permission_granted": True
+            }
+        )
+
+        if not result.get("success"):
+            return (
+                "Aether: I couldn't invoke "
+                f'"{control}" in {app_name}.\n'
+                f"{result.get('error', '')}"
+            ).rstrip()
+
+        return (
+            "Aether: Invoked "
+            f'"{control}" in {app_name}.\n'
+            "No coordinate click was used."
         )
 
     def _type_text_approved(

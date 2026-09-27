@@ -72,6 +72,12 @@ class LocalSystemProvider(BaseProvider):
         "videos": Path.home() / "Videos"
     }
 
+    UI_CONTROL_APPS = {
+        "notepad",
+        "calculator",
+        "calc"
+    }
+
     TEXT_INPUT_APPS = {
         "notepad",
         "vscode",
@@ -125,6 +131,8 @@ class LocalSystemProvider(BaseProvider):
             "restore_app",
             "type_text",
             "press_key",
+            "list_controls",
+            "invoke_control",
             "close_app",
             "run_command"
         ]
@@ -156,6 +164,10 @@ class LocalSystemProvider(BaseProvider):
             return self._type_text(task)
         if capability == "press_key":
             return self._press_key(task)
+        if capability == "list_controls":
+            return self._list_controls(task)
+        if capability == "invoke_control":
+            return self._invoke_control(task)
         if capability == "close_app":
             return self._close_app(task)
         if capability == "run_command":
@@ -506,12 +518,49 @@ class LocalSystemProvider(BaseProvider):
 
         expected_process = Path(executable).stem.lower()
 
-        matches = [
-            item
-            for item in window_result.get("windows", [])
-            if str(item.get("process", "")).lower()
-            == expected_process
-        ]
+        matches = []
+
+        for item in window_result.get(
+            "windows",
+            []
+        ):
+            process_name = str(
+                item.get(
+                    "process",
+                    ""
+                )
+            ).lower()
+
+            title = str(
+                item.get(
+                    "title",
+                    ""
+                )
+            ).strip().lower()
+
+            direct_match = (
+                process_name
+                == expected_process
+            )
+
+            calculator_frame_match = (
+                app_name in {
+                    "calculator",
+                    "calc"
+                }
+                and process_name
+                == "applicationframehost"
+                and title
+                == "calculator"
+            )
+
+            if (
+                direct_match
+                or calculator_frame_match
+            ):
+                matches.append(
+                    item
+                )
 
         return {
             "success": True,
@@ -1227,6 +1276,337 @@ class LocalSystemProvider(BaseProvider):
             "capability": "press_key",
             "application": app_name,
             "key": key_name
+        }
+
+
+    def _ui_control_target(self, app_name):
+        app_name = self._normalize_app_name(app_name)
+
+        if app_name not in self.APP_ALIASES:
+            return None, {
+                "success": False,
+                "provider": self.name,
+                "error": (
+                    f'Application "{app_name}" '
+                    "is not in the approved app list."
+                )
+            }
+
+        if app_name not in self.UI_CONTROL_APPS:
+            return None, {
+                "success": False,
+                "provider": self.name,
+                "application": app_name,
+                "error": (
+                    f'Application "{app_name}" is not approved '
+                    "for UI control targeting."
+                )
+            }
+
+        result = self._list_app_windows(
+            {"app": app_name}
+        )
+
+        if not result.get("success"):
+            return None, result
+
+        windows = result.get("windows", [])
+
+        if not windows:
+            return None, {
+                "success": False,
+                "provider": self.name,
+                "application": app_name,
+                "error": (
+                    f'No visible window for "{app_name}" '
+                    "is available."
+                )
+            }
+
+        pid = str(windows[0].get("pid", "")).strip()
+
+        if not pid.isdigit():
+            return None, {
+                "success": False,
+                "provider": self.name,
+                "application": app_name,
+                "error": "The target window PID was invalid."
+            }
+
+        return {
+            "app": app_name,
+            "pid": pid,
+            "title": windows[0].get("title", "")
+        }, None
+
+    def _list_controls(self, task):
+        app_name = (
+            task.get("app", "")
+            if isinstance(task, dict)
+            else str(task)
+        )
+
+        target, error = self._ui_control_target(app_name)
+
+        if error is not None:
+            error["capability"] = "list_controls"
+            return error
+
+        pid = target["pid"]
+
+        script = (
+            "Add-Type -AssemblyName UIAutomationClient; "
+            "Add-Type -AssemblyName UIAutomationTypes; "
+            f"$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { exit 2 }; "
+            "$h = $p.MainWindowHandle; "
+            "if ($h -eq 0) { exit 3 }; "
+            "$root = [System.Windows.Automation.AutomationElement]"
+            "::FromHandle($h); "
+            "$all = $root.FindAll("
+            "[System.Windows.Automation.TreeScope]::Descendants,"
+            "[System.Windows.Automation.Condition]::TrueCondition"
+            "); "
+            "$items = foreach ($e in $all) { "
+            "$n=$e.Current.Name; $a=$e.Current.AutomationId; "
+            "$t=$e.Current.ControlType.ProgrammaticName; "
+            "$enabled=$e.Current.IsEnabled; "
+            "if (($n -and $n.Trim()) -or ($a -and $a.Trim())) { "
+            "[PSCustomObject]@{Name=$n;AutomationId=$a;"
+            "ControlType=$t;IsEnabled=$enabled} "
+            "} }; "
+            "$items | Select-Object -First 120 | ConvertTo-Json -Compress"
+        )
+
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                shell=False
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "list_controls",
+                "application": target["app"],
+                "error": str(exc)
+            }
+
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "list_controls",
+                "application": target["app"],
+                "error": (
+                    result.stderr.strip()
+                    or "Unable to inspect application controls."
+                )
+            }
+
+        raw = result.stdout.strip()
+
+        if not raw:
+            data = []
+        else:
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                return {
+                    "success": False,
+                    "provider": self.name,
+                    "capability": "list_controls",
+                    "application": target["app"],
+                    "error": f"Unable to parse UI controls: {exc}"
+                }
+
+        if isinstance(data, dict):
+            data = [data]
+
+        controls = []
+
+        for item in data if isinstance(data, list) else []:
+            controls.append(
+                {
+                    "name": str(item.get("Name", "") or ""),
+                    "automation_id": str(
+                        item.get("AutomationId", "") or ""
+                    ),
+                    "control_type": str(
+                        item.get("ControlType", "") or ""
+                    ),
+                    "enabled": bool(
+                        item.get("IsEnabled", False)
+                    )
+                }
+            )
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "list_controls",
+            "application": target["app"],
+            "count": len(controls),
+            "controls": controls
+        }
+
+    def _invoke_control(self, task):
+        if not isinstance(task, dict):
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "error": "UI control actions require a structured task."
+            }
+
+        app_name = task.get("app", "")
+        control = str(
+            task.get("control", "") or ""
+        ).strip()
+        permission_granted = (
+            task.get("permission_granted") is True
+        )
+
+        if not permission_granted:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "requires_permission": True,
+                "error": (
+                    "Explicit permission is required before "
+                    "invoking a UI control."
+                )
+            }
+
+        if not control:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "error": "No UI control target was provided."
+            }
+
+        target, error = self._ui_control_target(app_name)
+
+        if error is not None:
+            error["capability"] = "invoke_control"
+            return error
+
+        controls_result = self._list_controls(
+            {"app": target["app"]}
+        )
+
+        if not controls_result.get("success"):
+            return controls_result
+
+        key = control.lower()
+
+        exact = [
+            item
+            for item in controls_result.get("controls", [])
+            if (
+                str(item.get("name", "")).strip().lower() == key
+                or str(
+                    item.get("automation_id", "")
+                ).strip().lower() == key
+            )
+        ]
+
+        enabled = [
+            item for item in exact
+            if item.get("enabled")
+        ]
+
+        if len(enabled) != 1:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "application": target["app"],
+                "error": (
+                    "The target control was missing, ambiguous, "
+                    "or disabled. Aether will not guess."
+                )
+            }
+
+        pid = target["pid"]
+        safe_control = control.replace("'", "''")
+
+        script = (
+            "Add-Type -AssemblyName UIAutomationClient; "
+            "Add-Type -AssemblyName UIAutomationTypes; "
+            f"$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { exit 2 }; "
+            "$h = $p.MainWindowHandle; "
+            "if ($h -eq 0) { exit 3 }; "
+            "$root = [System.Windows.Automation.AutomationElement]"
+            "::FromHandle($h); "
+            f"$target = '{safe_control}'; "
+            "$all = $root.FindAll("
+            "[System.Windows.Automation.TreeScope]::Descendants,"
+            "[System.Windows.Automation.Condition]::TrueCondition"
+            "); "
+            "$matches=@(); "
+            "foreach ($e in $all) { "
+            "$n=$e.Current.Name; $a=$e.Current.AutomationId; "
+            "if (($n -eq $target) -or ($a -eq $target)) { "
+            "if ($e.Current.IsEnabled) { $matches += $e } "
+            "} }; "
+            "if ($matches.Count -ne 1) { exit 4 }; "
+            "$e=$matches[0]; $pattern=$null; "
+            "if ($e.TryGetCurrentPattern("
+            "[System.Windows.Automation.InvokePattern]::Pattern,"
+            "[ref]$pattern)) { "
+            "([System.Windows.Automation.InvokePattern]$pattern)"
+            ".Invoke(); exit 0 }; "
+            "if ($e.TryGetCurrentPattern("
+            "[System.Windows.Automation.SelectionItemPattern]::Pattern,"
+            "[ref]$pattern)) { "
+            "([System.Windows.Automation.SelectionItemPattern]$pattern)"
+            ".Select(); exit 0 }; "
+            "exit 5"
+        )
+
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                shell=False
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "application": target["app"],
+                "error": str(exc)
+            }
+
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "provider": self.name,
+                "capability": "invoke_control",
+                "application": target["app"],
+                "error": (
+                    "The exact control does not expose one safe "
+                    "Invoke/Select action."
+                )
+            }
+
+        return {
+            "success": True,
+            "provider": self.name,
+            "capability": "invoke_control",
+            "application": target["app"],
+            "control": control,
+            "coordinate_click": False
         }
 
     def _close_app(self, task):
