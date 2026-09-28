@@ -571,6 +571,650 @@ class BrowserSkill:
         }
 
     # ---------------------------------
+    # BROWSER GOAL PLANNING V2
+    # ---------------------------------
+
+    def _normalize_goal_label(
+        self,
+        value,
+    ):
+        value = str(
+            value or ""
+        ).strip().lower()
+
+        value = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            value,
+        )
+
+        return " ".join(
+            value.split()
+        )
+
+    def _goal_named_element_candidate(
+        self,
+        elements,
+        requested_target,
+    ):
+        requested = (
+            self._normalize_goal_label(
+                requested_target
+            )
+        )
+
+        if not requested:
+            return (
+                None,
+                "No browser element name was provided."
+            )
+
+        # Natural phrases like "pricing page" should still
+        # be able to match a live element named "Pricing".
+        simplified = requested
+
+        removable_suffixes = (
+            " page",
+            " link",
+            " button",
+        )
+
+        for suffix in removable_suffixes:
+
+            if simplified.endswith(
+                suffix
+            ):
+                simplified = (
+                    simplified[
+                        :-len(suffix)
+                    ].strip()
+                )
+
+        candidates = []
+
+        for item in elements:
+
+            tag = str(
+                item.get(
+                    "tag",
+                    "",
+                )
+            ).lower()
+
+            if tag not in (
+                "a",
+                "button",
+                "input",
+            ):
+                continue
+
+            label = str(
+                item.get(
+                    "label",
+                    "",
+                )
+            ).strip()
+
+            if not label:
+                continue
+
+            normalized = (
+                self._normalize_goal_label(
+                    label
+                )
+            )
+
+            if normalized == requested:
+
+                candidates.append(
+                    (
+                        300,
+                        label,
+                    )
+                )
+
+                continue
+
+            if (
+                simplified
+                and normalized
+                == simplified
+            ):
+
+                candidates.append(
+                    (
+                        250,
+                        label,
+                    )
+                )
+
+                continue
+
+            if (
+                simplified
+                and simplified
+                in normalized
+            ):
+
+                candidates.append(
+                    (
+                        100,
+                        label,
+                    )
+                )
+
+        if not candidates:
+
+            return (
+                None,
+                (
+                    "No visible clickable element matched "
+                    f'"{requested_target}".'
+                )
+            )
+
+        best_score = max(
+            item[0]
+            for item in candidates
+        )
+
+        best = [
+            item
+            for item in candidates
+            if item[0] == best_score
+        ]
+
+        unique_labels = []
+
+        for _, label in best:
+
+            if label not in unique_labels:
+                unique_labels.append(
+                    label
+                )
+
+        if len(unique_labels) != 1:
+
+            return (
+                None,
+                (
+                    "Multiple live page elements matched "
+                    f'"{requested_target}". '
+                    "I will not guess."
+                )
+            )
+
+        return (
+            unique_labels[0],
+            None,
+        )
+
+    def _goal_named_field_candidate(
+        self,
+        elements,
+        requested_field,
+    ):
+        requested = (
+            self._normalize_goal_label(
+                requested_field
+            )
+        )
+
+        if not requested:
+
+            return (
+                None,
+                "No field name was provided."
+            )
+
+        exact = []
+
+        partial = []
+
+        for item in elements:
+
+            tag = str(
+                item.get(
+                    "tag",
+                    "",
+                )
+            ).lower()
+
+            if tag not in (
+                "input",
+                "textarea",
+            ):
+                continue
+
+            item_type = str(
+                item.get(
+                    "type",
+                    "",
+                )
+            ).lower()
+
+            if item_type == "password":
+
+                continue
+
+            label = str(
+                item.get(
+                    "label",
+                    "",
+                )
+            ).strip()
+
+            if not label:
+                continue
+
+            normalized = (
+                self._normalize_goal_label(
+                    label
+                )
+            )
+
+            if normalized == requested:
+
+                exact.append(
+                    label
+                )
+
+            elif requested in normalized:
+
+                partial.append(
+                    label
+                )
+
+        candidates = (
+            exact
+            if exact
+            else partial
+        )
+
+        unique = []
+
+        for label in candidates:
+
+            if label not in unique:
+                unique.append(
+                    label
+                )
+
+        if not unique:
+
+            return (
+                None,
+                (
+                    "No visible editable field matched "
+                    f'"{requested_field}".'
+                )
+            )
+
+        if len(unique) != 1:
+
+            return (
+                None,
+                (
+                    "Multiple live fields matched "
+                    f'"{requested_field}". '
+                    "I will not guess."
+                )
+            )
+
+        return (
+            unique[0],
+            None,
+        )
+
+    def _prepare_goal_page(
+        self,
+        site,
+    ):
+        url = self._resolve_goal_site(
+            site
+        )
+
+        if url is None:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser Goal Planning v2 "
+                    "doesn't recognize that site safely.\n"
+                    "Use an explicit domain/URL or a "
+                    "supported site alias."
+                ),
+            }
+
+        navigation = (
+            self.provider.execute(
+                "browser_navigate",
+                {
+                    "url": url,
+                },
+            )
+        )
+
+        self.last_execution_result = (
+            navigation
+        )
+
+        if not navigation.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    self._format_result(
+                        navigation
+                    )
+                ),
+            }
+
+        inspection = (
+            self.provider.execute(
+                "browser_inspect",
+                {},
+            )
+        )
+
+        if not inspection.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    self._format_result(
+                        inspection
+                    )
+                ),
+            }
+
+        return {
+            "success": True,
+            "url": navigation.get(
+                "url",
+                url,
+            ),
+            "title": navigation.get(
+                "title",
+                "",
+            ),
+            "elements": inspection.get(
+                "elements",
+                [],
+            ),
+        }
+
+    def plan_natural_browser_goal(
+        self,
+        message,
+    ):
+        """
+        Browser Goal Planning v2.
+
+        Search goals continue through the existing v1
+        deterministic planner.
+
+        Additional supported goals:
+        - go to SITE and click TARGET
+        - go to SITE and find TARGET
+        - go to SITE and fill FIELD with TEXT
+
+        Every target is checked against the live DOM before
+        a workflow is created.
+        """
+
+        existing_search = (
+            self.plan_natural_search_goal(
+                message
+            )
+        )
+
+        if existing_search is not None:
+            return existing_search
+
+        message = str(
+            message or ""
+        ).strip()
+
+        # ---------------------------------
+        # FILL GOAL
+        # ---------------------------------
+
+        fill_match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)\s+and\s+'
+            r'fill\s+"([^"]+)"\s+with\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if fill_match:
+
+            site = (
+                fill_match.group(1)
+                .strip()
+                .strip('"')
+            )
+
+            requested_field = (
+                fill_match.group(2)
+                .strip()
+            )
+
+            value = (
+                fill_match.group(3)
+                .strip()
+            )
+
+            if (
+                len(value) >= 2
+                and value[0] == '"'
+                and value[-1] == '"'
+            ):
+                value = value[1:-1]
+
+            if not value:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. No text was provided."
+                    ),
+                }
+
+            if len(value) > 500:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. The text is too long."
+                    ),
+                }
+
+            if any(
+                char in value
+                for char in (
+                    "\n",
+                    "\r",
+                    "\t",
+                )
+            ):
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. Control characters "
+                        "are not allowed."
+                    ),
+                }
+
+            if " then " in value.lower():
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. The text contains the "
+                        'reserved workflow separator "then".'
+                    ),
+                }
+
+            page = (
+                self._prepare_goal_page(
+                    site
+                )
+            )
+
+            if not page.get(
+                "success",
+                False,
+            ):
+                return page
+
+            field, error = (
+                self._goal_named_field_candidate(
+                    page["elements"],
+                    requested_field,
+                )
+            )
+
+            if error:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped.\n"
+                        + error
+                    ),
+                }
+
+            if '"' in field:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. The field name contains "
+                        "an unsupported quote character."
+                    ),
+                }
+
+            return {
+                "success": True,
+                "site": site,
+                "url": page["url"],
+                "title": page["title"],
+                "field": field,
+                "target": None,
+                "workflow_request": (
+                    f'fill "{field}" with {value}'
+                ),
+            }
+
+        # ---------------------------------
+        # CLICK / FIND GOAL
+        # ---------------------------------
+
+        click_match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)\s+and\s+'
+            r'(?:click|find|open)\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if click_match:
+
+            site = (
+                click_match.group(1)
+                .strip()
+                .strip('"')
+            )
+
+            requested_target = (
+                click_match.group(2)
+                .strip()
+                .strip('"')
+            )
+
+            if not requested_target:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. No target was provided."
+                    ),
+                }
+
+            page = (
+                self._prepare_goal_page(
+                    site
+                )
+            )
+
+            if not page.get(
+                "success",
+                False,
+            ):
+                return page
+
+            target, error = (
+                self._goal_named_element_candidate(
+                    page["elements"],
+                    requested_target,
+                )
+            )
+
+            if error:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped.\n"
+                        + error
+                    ),
+                }
+
+            if '"' in target:
+
+                return {
+                    "success": False,
+                    "response": (
+                        "Aether: Browser goal planning "
+                        "stopped. The target contains an "
+                        "unsupported quote character."
+                    ),
+                }
+
+            return {
+                "success": True,
+                "site": site,
+                "url": page["url"],
+                "title": page["title"],
+                "field": None,
+                "target": target,
+                "workflow_request": (
+                    f'browser click "{target}"'
+                ),
+            }
+
+        return None
+
+    # ---------------------------------
     # HANDLE
     # ---------------------------------
 

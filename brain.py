@@ -943,7 +943,7 @@ class Brain:
 
             browser_plan = (
                 browser_skill
-                .plan_natural_search_goal(
+                .plan_natural_browser_goal(
                     message
                 )
             )
