@@ -1437,6 +1437,38 @@ class WorkflowEngine:
                     }
 
             # ---------------------------------
+            # BROWSER PERMISSION
+            # ---------------------------------
+
+            if action == "browser":
+
+                browser_skill = (
+                    self.skill_manager
+                    .registry
+                    .get_skill(
+                        "browser"
+                    )
+                )
+
+                if (
+                    browser_skill is not None
+                    and browser_skill
+                    .permissions
+                    .has_pending()
+                ):
+
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "type": "skill",
+                        "action": action,
+                        "permission_source": (
+                            "browser"
+                        ),
+                        "response": response
+                    }
+
+            # ---------------------------------
             # RESEARCH STRUCTURED RESULT
             # ---------------------------------
 

@@ -318,6 +318,14 @@ class WorkflowSkill:
             )
         )
 
+        browser_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "browser"
+            )
+        )
+
         if (
             terminal_skill is not None
             and terminal_skill
@@ -352,6 +360,18 @@ class WorkflowSkill:
             return (
                 "desktop",
                 desktop_skill
+            )
+
+        if (
+            browser_skill is not None
+            and browser_skill
+            .permissions
+            .has_pending()
+        ):
+
+            return (
+                "browser",
+                browser_skill
             )
 
         return (
@@ -443,6 +463,13 @@ class WorkflowSkill:
             denied = (
                 permission_response
                 == "Aether: Desktop action cancelled."
+            )
+
+        elif permission_source == "browser":
+
+            denied = (
+                permission_response
+                == "Aether: Browser action cancelled."
             )
 
         if denied:
@@ -713,6 +740,118 @@ class WorkflowSkill:
                 }
             )
 
+        # ---------------------------------
+        # BROWSER RESULT
+        # ---------------------------------
+
+        elif permission_source == "browser":
+
+            browser_result = getattr(
+                skill,
+                "last_execution_result",
+                None
+            )
+
+            if (
+                browser_result is None
+                or not browser_result.get(
+                    "success",
+                    False
+                )
+            ):
+
+                error = (
+                    browser_result.get(
+                        "error"
+                    )
+                    if isinstance(
+                        browser_result,
+                        dict
+                    )
+                    else permission_response
+                )
+
+                workflow.add_result(
+                    {
+                        "success": False,
+                        "paused": False,
+                        "type": "skill",
+                        "action": "browser",
+                        "response": (
+                            permission_response
+                        ),
+                        "error": (
+                            error
+                            or permission_response
+                        )
+                    }
+                )
+
+                workflow.status = (
+                    "failed"
+                )
+
+                workflow.touch()
+
+                self.engine.store.save(
+                    workflow
+                )
+
+                self.pending_workflow = None
+                self.recovered_workflow = None
+
+                return (
+                    self._format_result(
+                        workflow,
+                        {
+                            "success": False,
+                            "paused": False,
+                            "status": "failed",
+                            "progress": (
+                                workflow.progress()
+                            ),
+                            "results": (
+                                workflow.results
+                            )
+                        }
+                    )
+                )
+
+            workflow.add_result(
+                {
+                    "success": True,
+                    "paused": False,
+                    "type": "skill",
+                    "action": "browser",
+                    "response": (
+                        permission_response
+                    ),
+                    "output": (
+                        permission_response
+                    ),
+                    "url": (
+                        browser_result.get(
+                            "url"
+                        )
+                    ),
+                    "title": (
+                        browser_result.get(
+                            "title"
+                        )
+                    ),
+                    "target": (
+                        browser_result.get(
+                            "target"
+                        )
+                    ),
+                    "field": (
+                        browser_result.get(
+                            "field"
+                        )
+                    )
+                }
+            )
+
         self.engine.store.save(
             workflow
         )
@@ -857,6 +996,14 @@ class WorkflowSkill:
             )
         )
 
+        browser_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "browser"
+            )
+        )
+
         if terminal_skill is not None:
 
             terminal_skill.permissions.cancel()
@@ -868,6 +1015,10 @@ class WorkflowSkill:
         if desktop_skill is not None:
 
             desktop_skill.permissions.cancel()
+
+        if browser_skill is not None:
+
+            browser_skill.permissions.cancel()
 
         workflow.status = (
             "cancelled"
@@ -1212,6 +1363,55 @@ class WorkflowSkill:
                         "message": (
                             search_message
                         )
+                    }
+                )
+
+                continue
+
+            # -------------------------
+            # BROWSER ACTION
+            # -------------------------
+
+            browser_request = (
+                lower.startswith(
+                    "browser open "
+                )
+                or lower.startswith(
+                    "browse to "
+                )
+                or lower.startswith(
+                    "go to http://"
+                )
+                or lower.startswith(
+                    "go to https://"
+                )
+                or lower.startswith(
+                    "fill "
+                )
+                or lower.startswith(
+                    "browser click "
+                )
+                or lower in (
+                    "show page elements",
+                    "list page elements",
+                    "show browser elements",
+                    "list browser elements",
+                    "inspect page",
+                    "inspect browser page",
+                    "browser status",
+                    "show browser status",
+                    "close browser session",
+                    "end browser session"
+                )
+            )
+
+            if browser_request:
+
+                workflow.add_step(
+                    "skill",
+                    "browser",
+                    {
+                        "message": part
                     }
                 )
 
