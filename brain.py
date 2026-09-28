@@ -928,6 +928,77 @@ class Brain:
             return output.rstrip()
 
         # ---------------------------------
+        # BROWSER GOAL PLANNING V1
+        # ---------------------------------
+
+        browser_skill = (
+            self.skill_manager
+            .registry
+            .get_skill(
+                "browser"
+            )
+        )
+
+        if browser_skill is not None:
+
+            browser_plan = (
+                browser_skill
+                .plan_natural_search_goal(
+                    message
+                )
+            )
+
+            if browser_plan is not None:
+
+                if not browser_plan.get(
+                    "success",
+                    False,
+                ):
+
+                    return browser_plan.get(
+                        "response",
+                        (
+                            "Aether: Browser goal "
+                            "planning failed safely."
+                        ),
+                    )
+
+                workflow_message = (
+                    "workflow "
+                    + browser_plan[
+                        "workflow_request"
+                    ]
+                )
+
+                workflow_response = (
+                    self.skill_manager
+                    .handle(
+                        workflow_message
+                    )
+                )
+
+                if workflow_response is None:
+
+                    return (
+                        "Aether: I identified the browser "
+                        "controls, but couldn't create the "
+                        "safe workflow. Nothing further "
+                        "was executed."
+                    )
+
+                return (
+                    "Aether: Browser goal planned from "
+                    "live page elements.\n"
+                    f"Page: "
+                    f"{browser_plan.get('title') or browser_plan.get('url')}\n"
+                    f"Search field: "
+                    f"{browser_plan.get('field')}\n"
+                    f"Search action: "
+                    f"{browser_plan.get('target')}\n\n"
+                    + workflow_response
+                )
+
+        # ---------------------------------
         # DYNAMIC ORCHESTRATION
         # ---------------------------------
 

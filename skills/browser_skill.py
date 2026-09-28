@@ -72,6 +72,505 @@ class BrowserSkill:
         self.last_execution_result = None
 
     # ---------------------------------
+    # NATURAL BROWSER GOAL PLANNING
+    # ---------------------------------
+
+    def _resolve_goal_site(
+        self,
+        site,
+    ):
+        site = str(
+            site or ""
+        ).strip().strip('"')
+
+        lower = site.lower()
+
+        aliases = {
+            "wikipedia": (
+                "https://www.wikipedia.org"
+            ),
+            "wikipedia.org": (
+                "https://www.wikipedia.org"
+            ),
+            "www.wikipedia.org": (
+                "https://www.wikipedia.org"
+            ),
+        }
+
+        if lower in aliases:
+            return aliases[lower]
+
+        if lower.startswith(
+            (
+                "http://",
+                "https://",
+            )
+        ):
+            return site
+
+        if (
+            "." in site
+            and " " not in site
+        ):
+            return (
+                "https://"
+                + site
+            )
+
+        return None
+
+    def _goal_field_candidate(
+        self,
+        elements,
+    ):
+        candidates = []
+
+        for item in elements:
+
+            tag = str(
+                item.get(
+                    "tag",
+                    "",
+                )
+            ).lower()
+
+            field_type = str(
+                item.get(
+                    "type",
+                    "",
+                )
+            ).lower()
+
+            label = str(
+                item.get(
+                    "label",
+                    "",
+                )
+            ).strip()
+
+            lower_label = (
+                label.lower()
+            )
+
+            if tag not in (
+                "input",
+                "textarea",
+            ):
+                continue
+
+            score = 0
+
+            if field_type == "search":
+                score += 100
+
+            if lower_label == "search":
+                score += 80
+
+            elif "search" in lower_label:
+                score += 40
+
+            elif (
+                "query" in lower_label
+                or "find" in lower_label
+            ):
+                score += 20
+
+            if score > 0:
+
+                candidates.append(
+                    (
+                        score,
+                        label,
+                    )
+                )
+
+        if not candidates:
+            return (
+                None,
+                "No clear search field was found "
+                "on the live page."
+            )
+
+        best_score = max(
+            item[0]
+            for item in candidates
+        )
+
+        best = [
+            item
+            for item in candidates
+            if item[0] == best_score
+        ]
+
+        labels = {
+            item[1]
+            for item in best
+        }
+
+        if len(best) != 1:
+
+            return (
+                None,
+                "The page has multiple equally likely "
+                "search fields. I will not guess."
+            )
+
+        label = best[0][1]
+
+        if not label:
+
+            return (
+                None,
+                "The search field does not expose a safe "
+                "exact name that Aether can target."
+            )
+
+        return (
+            label,
+            None,
+        )
+
+    def _goal_button_candidate(
+        self,
+        elements,
+    ):
+        candidates = []
+
+        for item in elements:
+
+            tag = str(
+                item.get(
+                    "tag",
+                    "",
+                )
+            ).lower()
+
+            item_type = str(
+                item.get(
+                    "type",
+                    "",
+                )
+            ).lower()
+
+            label = str(
+                item.get(
+                    "label",
+                    "",
+                )
+            ).strip()
+
+            lower_label = (
+                label.lower()
+            )
+
+            if tag not in (
+                "button",
+                "input",
+                "a",
+            ):
+                continue
+
+            score = 0
+
+            if lower_label == "search":
+                score += 100
+
+            elif "search" in lower_label:
+                score += 50
+
+            if item_type == "submit":
+                score += 60
+
+            if score > 0:
+
+                candidates.append(
+                    (
+                        score,
+                        label,
+                    )
+                )
+
+        if not candidates:
+            return (
+                None,
+                "No clear search action was found "
+                "on the live page."
+            )
+
+        best_score = max(
+            item[0]
+            for item in candidates
+        )
+
+        best = [
+            item
+            for item in candidates
+            if item[0] == best_score
+        ]
+
+        if len(best) != 1:
+
+            return (
+                None,
+                "The page has multiple equally likely "
+                "search actions. I will not guess."
+            )
+
+        label = best[0][1]
+
+        if not label:
+
+            return (
+                None,
+                "The search action does not expose a safe "
+                "exact name that Aether can target."
+            )
+
+        return (
+            label,
+            None,
+        )
+
+    def plan_natural_search_goal(
+        self,
+        message,
+    ):
+        """
+        Convert a narrow natural browser-search goal into
+        an exact workflow using live page evidence.
+
+        Returns None when the message is not a supported
+        natural browser goal.
+        """
+
+        message = str(
+            message or ""
+        ).strip()
+
+        match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)\s+and\s+'
+            r'(?:search(?:\s+for)?|look up)\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        site = (
+            match.group(1)
+            .strip()
+            .strip('"')
+        )
+
+        query = (
+            match.group(2)
+            .strip()
+        )
+
+        if (
+            len(query) >= 2
+            and query[0] == '"'
+            and query[-1] == '"'
+        ):
+            query = query[1:-1]
+
+        query = query.strip()
+
+        if not query:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    "No search text was provided."
+                ),
+            }
+
+        if len(query) > 500:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    "The search text is too long for "
+                    "Browser Goal Planning v1."
+                ),
+            }
+
+        if (
+            "\n" in query
+            or "\r" in query
+            or "\t" in query
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    "Control characters are not allowed "
+                    "in this browser goal."
+                ),
+            }
+
+        # WorkflowSkill currently separates natural steps
+        # using the literal phrase " then ".
+        if " then " in query.lower():
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    'The search text contains the reserved '
+                    'workflow separator "then".'
+                ),
+            }
+
+        url = self._resolve_goal_site(
+            site
+        )
+
+        if url is None:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser Goal Planning v1 "
+                    "doesn't recognize that site safely.\n"
+                    "Use an explicit domain/URL, or the "
+                    "supported site alias Wikipedia."
+                ),
+            }
+
+        # Navigation and inspection are read-only / low-risk.
+        navigation = (
+            self.provider.execute(
+                "browser_navigate",
+                {
+                    "url": url,
+                },
+            )
+        )
+
+        self.last_execution_result = (
+            navigation
+        )
+
+        if not navigation.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    self._format_result(
+                        navigation
+                    )
+                ),
+            }
+
+        inspection = (
+            self.provider.execute(
+                "browser_inspect",
+                {},
+            )
+        )
+
+        if not inspection.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    self._format_result(
+                        inspection
+                    )
+                ),
+            }
+
+        elements = inspection.get(
+            "elements",
+            [],
+        )
+
+        field, field_error = (
+            self._goal_field_candidate(
+                elements
+            )
+        )
+
+        if field_error:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    + field_error
+                ),
+            }
+
+        target, target_error = (
+            self._goal_button_candidate(
+                elements
+            )
+        )
+
+        if target_error:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    + target_error
+                ),
+            }
+
+        # Exact-match workflow syntax cannot safely contain
+        # quote characters in the chosen element names.
+        if (
+            '"' in field
+            or '"' in target
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    "A required page element contains an "
+                    "unsupported quote character."
+                ),
+            }
+
+        workflow_request = (
+            f'fill "{field}" with {query}'
+            f' then browser click "{target}"'
+        )
+
+        return {
+            "success": True,
+            "site": site,
+            "url": navigation.get(
+                "url",
+                url,
+            ),
+            "title": navigation.get(
+                "title",
+                "",
+            ),
+            "query": query,
+            "field": field,
+            "target": target,
+            "workflow_request": (
+                workflow_request
+            ),
+        }
+
+    # ---------------------------------
     # HANDLE
     # ---------------------------------
 
