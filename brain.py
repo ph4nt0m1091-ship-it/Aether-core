@@ -941,6 +941,16 @@ class Brain:
 
         if browser_skill is not None:
 
+            agent_response = (
+                browser_skill
+                .start_goal_driven_navigation(
+                    message
+                )
+            )
+
+            if agent_response is not None:
+                return agent_response
+
             browser_plan = (
                 browser_skill
                 .plan_natural_browser_goal(

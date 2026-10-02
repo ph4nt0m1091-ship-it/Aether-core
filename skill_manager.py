@@ -70,6 +70,26 @@ class SkillManager:
                     )
                 )
 
+            browser_skill = (
+                self.registry
+                .get_skill(
+                    "browser"
+                )
+            )
+
+            if (
+                browser_skill is not None
+                and browser_skill
+                .permissions
+                .has_pending()
+            ):
+
+                return (
+                    browser_skill.handle(
+                        message
+                    )
+                )
+
             return self.registry.handle(
                 message
             )

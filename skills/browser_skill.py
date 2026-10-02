@@ -71,6 +71,11 @@ class BrowserSkill:
 
         self.last_execution_result = None
 
+        # Foreground-only browser goal agent state.
+        # This is intentionally not persisted across restarts.
+        self.agent_goal = None
+        self.agent_max_hops = 3
+
     # ---------------------------------
     # NATURAL BROWSER GOAL PLANNING
     # ---------------------------------
@@ -950,6 +955,601 @@ class BrowserSkill:
             ),
         }
 
+    # ---------------------------------
+    # BROWSER GOAL AGENT V4
+    # ---------------------------------
+
+    def _agent_goal_tokens(
+        self,
+        value,
+    ):
+        normalized = (
+            self._normalize_goal_label(
+                value
+            )
+        )
+
+        stop_words = {
+            "a",
+            "an",
+            "and",
+            "about",
+            "find",
+            "for",
+            "in",
+            "of",
+            "on",
+            "page",
+            "reach",
+            "the",
+            "to",
+        }
+
+        return [
+            token
+            for token in normalized.split()
+            if (
+                len(token) >= 2
+                and token not in stop_words
+            )
+        ]
+
+    def _agent_snapshot(
+        self,
+    ):
+        status = self.provider.execute(
+            "browser_status",
+            {},
+        )
+
+        if not status.get(
+            "success",
+            False,
+        ):
+            return {
+                "success": False,
+                "response": self._format_result(
+                    status
+                ),
+            }
+
+        inspection = self.provider.execute(
+            "browser_inspect",
+            {},
+        )
+
+        if not inspection.get(
+            "success",
+            False,
+        ):
+            return {
+                "success": False,
+                "response": self._format_result(
+                    inspection
+                ),
+            }
+
+        return {
+            "success": True,
+            "title": status.get(
+                "title",
+                "",
+            ),
+            "url": status.get(
+                "url",
+                "",
+            ),
+            "elements": inspection.get(
+                "elements",
+                [],
+            ),
+        }
+
+    def _agent_goal_is_complete(
+        self,
+        goal,
+        title,
+        url,
+    ):
+        tokens = self._agent_goal_tokens(
+            goal
+        )
+
+        if not tokens:
+            return False
+
+        page_tokens = set(
+            self._normalize_goal_label(
+                (
+                    str(title or "")
+                    + " "
+                    + str(url or "")
+                )
+            ).split()
+        )
+
+        return all(
+            token in page_tokens
+            for token in tokens
+        )
+
+    def _agent_choose_target(
+        self,
+        elements,
+        goal,
+        url,
+    ):
+        goal_tokens = (
+            self._agent_goal_tokens(
+                goal
+            )
+        )
+
+        if not goal_tokens:
+            return (
+                None,
+                None,
+                "The browser goal does not contain "
+                "enough specific words to plan safely."
+            )
+
+        state = self.agent_goal or {}
+
+        used_pairs = {
+            (
+                str(item.get("url", "")),
+                str(item.get("target", "")),
+            )
+            for item in state.get(
+                "history",
+                [],
+            )
+            if isinstance(
+                item,
+                dict,
+            )
+        }
+
+        candidates = []
+
+        for item in elements:
+
+            tag = str(
+                item.get(
+                    "tag",
+                    "",
+                )
+            ).lower()
+
+            if tag not in (
+                "a",
+                "button",
+                "input",
+            ):
+                continue
+
+            item_type = str(
+                item.get(
+                    "type",
+                    "",
+                )
+            ).lower()
+
+            if item_type == "password":
+                continue
+
+            label = str(
+                item.get(
+                    "label",
+                    "",
+                )
+            ).strip()
+
+            if not label:
+                continue
+
+            if (
+                str(url or ""),
+                label,
+            ) in used_pairs:
+                continue
+
+            label_tokens = set(
+                self._normalize_goal_label(
+                    label
+                ).split()
+            )
+
+            overlap = sum(
+                1
+                for token in goal_tokens
+                if token in label_tokens
+            )
+
+            score = overlap * 100
+
+            if (
+                overlap
+                == len(goal_tokens)
+            ):
+                score += 200
+
+            candidates.append(
+                {
+                    "label": label,
+                    "score": score,
+                    "overlap": overlap,
+                }
+            )
+
+        if not candidates:
+            return (
+                None,
+                None,
+                "No unused visible clickable elements "
+                "are available for the goal."
+            )
+
+        matching = [
+            item
+            for item in candidates
+            if item["score"] > 0
+        ]
+
+        if matching:
+
+            best_score = max(
+                item["score"]
+                for item in matching
+            )
+
+            best = [
+                item
+                for item in matching
+                if item["score"] == best_score
+            ]
+
+            unique = []
+
+            for item in best:
+
+                if item["label"] not in unique:
+                    unique.append(
+                        item["label"]
+                    )
+
+            if len(unique) != 1:
+
+                return (
+                    None,
+                    None,
+                    "Multiple live page elements are "
+                    "equally good matches. I will not guess."
+                )
+
+            return (
+                unique[0],
+                "goal words match the live element",
+                None,
+            )
+
+        # If there is exactly one possible clickable element,
+        # Aether may use it as a bounded exploratory step.
+        # Multiple unexplained options are never guessed.
+        unique = []
+
+        for item in candidates:
+
+            if item["label"] not in unique:
+                unique.append(
+                    item["label"]
+                )
+
+        if len(unique) == 1:
+
+            return (
+                unique[0],
+                "it is the only unused visible clickable option",
+                None,
+            )
+
+        return (
+            None,
+            None,
+            "No live element matches the goal, and "
+            "multiple exploratory choices exist. "
+            "I will not guess."
+        )
+
+    def _agent_permission_message(
+        self,
+        target,
+        reason,
+        title,
+        url,
+    ):
+        state = self.agent_goal or {}
+
+        next_hop = (
+            int(
+                state.get(
+                    "hops",
+                    0,
+                )
+            )
+            + 1
+        )
+
+        return (
+            "Aether: Browser goal agent\n"
+            f"Goal: {state.get('goal', '')}\n"
+            f"Page: {title or url}\n"
+            f"Verified next action: {target}\n"
+            f"Reason: {reason}\n"
+            f"Hop: {next_hop} of "
+            f"{state.get('max_hops', self.agent_max_hops)}\n\n"
+            "Aether: Permission required.\n\n"
+            f"Browser element: {target}\n\n"
+            "Aether will click exactly one matching "
+            "enabled visible DOM element. "
+            "No screen coordinates will be used.\n\n"
+            'Say "yes" to approve or "no" to cancel.'
+        )
+
+    def _agent_continue_from_snapshot(
+        self,
+        snapshot,
+    ):
+        state = self.agent_goal
+
+        if state is None:
+
+            return (
+                "Aether: Browser goal agent is not active."
+            )
+
+        if not snapshot.get(
+            "success",
+            False,
+        ):
+            self.agent_goal = None
+
+            return snapshot.get(
+                "response",
+                (
+                    "Aether: Browser goal agent stopped "
+                    "because the page could not be inspected."
+                ),
+            )
+
+        title = snapshot.get(
+            "title",
+            "",
+        )
+
+        url = snapshot.get(
+            "url",
+            "",
+        )
+
+        if self._agent_goal_is_complete(
+            state.get(
+                "goal",
+                "",
+            ),
+            title,
+            url,
+        ):
+            hops = state.get(
+                "hops",
+                0,
+            )
+
+            goal = state.get(
+                "goal",
+                "",
+            )
+
+            self.agent_goal = None
+
+            return (
+                "Aether: Browser goal completed.\n"
+                f"Goal: {goal}\n"
+                f"Title: {title}\n"
+                f"URL: {url}\n"
+                f"Approved clicks used: {hops}"
+            )
+
+        if (
+            state.get(
+                "hops",
+                0,
+            )
+            >= state.get(
+                "max_hops",
+                self.agent_max_hops,
+            )
+        ):
+            goal = state.get(
+                "goal",
+                "",
+            )
+
+            self.agent_goal = None
+
+            return (
+                "Aether: Browser goal agent stopped safely.\n"
+                f"Goal: {goal}\n"
+                "The maximum approved-click limit "
+                "was reached before the goal was verified.\n"
+                f"Title: {title}\n"
+                f"URL: {url}"
+            )
+
+        target, reason, error = (
+            self._agent_choose_target(
+                snapshot.get(
+                    "elements",
+                    [],
+                ),
+                state.get(
+                    "goal",
+                    "",
+                ),
+                url,
+            )
+        )
+
+        if error:
+            goal = state.get(
+                "goal",
+                "",
+            )
+
+            self.agent_goal = None
+
+            return (
+                "Aether: Browser goal agent stopped safely.\n"
+                f"Goal: {goal}\n"
+                + error
+                + "\n"
+                f"Title: {title}\n"
+                f"URL: {url}"
+            )
+
+        state.setdefault(
+            "history",
+            [],
+        ).append(
+            {
+                "url": url,
+                "target": target,
+            }
+        )
+
+        self.permissions.request(
+            "browser_click",
+            {
+                "target": target,
+                "_agent_goal": True,
+            },
+        )
+
+        return self._agent_permission_message(
+            target,
+            reason,
+            title,
+            url,
+        )
+
+    def _continue_browser_agent(
+        self,
+    ):
+        return self._agent_continue_from_snapshot(
+            self._agent_snapshot()
+        )
+
+    def start_goal_driven_navigation(
+        self,
+        message,
+    ):
+        """
+        Start a bounded foreground browser agent.
+
+        Supported v4 shape:
+        go to SITE and find the page about GOAL
+        """
+
+        message = str(
+            message or ""
+        ).strip()
+
+        match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)\s+and\s+'
+            r'find\s+(?:the\s+)?page\s+about\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        if self.permissions.has_pending():
+
+            return (
+                "Aether: A browser permission request "
+                "is already waiting.\n"
+                'Say "yes" to approve or "no" to cancel it first.'
+            )
+
+        site = (
+            match.group(1)
+            .strip()
+            .strip('"')
+        )
+
+        goal = (
+            match.group(2)
+            .strip()
+            .strip('"')
+            .rstrip(".")
+            .strip()
+        )
+
+        if not goal:
+
+            return (
+                "Aether: Browser goal agent stopped.\n"
+                "No navigation goal was provided."
+            )
+
+        page = self._prepare_goal_page(
+            site
+        )
+
+        if not page.get(
+            "success",
+            False,
+        ):
+
+            return page.get(
+                "response",
+                (
+                    "Aether: Browser goal agent "
+                    "could not prepare the page."
+                ),
+            )
+
+        self.agent_goal = {
+            "goal": goal,
+            "site": site,
+            "hops": 0,
+            "max_hops": self.agent_max_hops,
+            "history": [],
+        }
+
+        snapshot = {
+            "success": True,
+            "title": page.get(
+                "title",
+                "",
+            ),
+            "url": page.get(
+                "url",
+                "",
+            ),
+            "elements": page.get(
+                "elements",
+                [],
+            ),
+        }
+
+        return self._agent_continue_from_snapshot(
+            snapshot
+        )
+
     def _plan_click_continuation_goal(
         self,
         message,
@@ -1384,7 +1984,21 @@ class BrowserSkill:
                 "cancel",
                 "deny",
             ):
-                self.permissions.cancel()
+                pending = self.permissions.take()
+
+                is_agent_action = bool(
+                    isinstance(
+                        pending,
+                        dict,
+                    )
+                    and pending.get(
+                        "data",
+                        {},
+                    ).get(
+                        "_agent_goal",
+                        False,
+                    )
+                )
 
                 self.last_execution_result = {
                     "success": False,
@@ -1393,6 +2007,14 @@ class BrowserSkill:
                         "Aether: Browser action cancelled."
                     ),
                 }
+
+                if is_agent_action:
+
+                    self.agent_goal = None
+
+                    return (
+                        "Aether: Browser goal cancelled."
+                    )
 
                 return (
                     "Aether: Browser action cancelled."
@@ -1419,6 +2041,13 @@ class BrowserSkill:
                 )
             )
 
+            is_agent_action = bool(
+                data.pop(
+                    "_agent_goal",
+                    False,
+                )
+            )
+
             data[
                 "permission_granted"
             ] = True
@@ -1434,8 +2063,54 @@ class BrowserSkill:
                 result
             )
 
-            return self._format_result(
-                result
+            if not is_agent_action:
+
+                return self._format_result(
+                    result
+                )
+
+            if not result.get(
+                "success",
+                False,
+            ):
+                self.agent_goal = None
+
+                return self._format_result(
+                    result
+                )
+
+            if self.agent_goal is None:
+
+                return self._format_result(
+                    result
+                )
+
+            self.agent_goal[
+                "hops"
+            ] = (
+                int(
+                    self.agent_goal.get(
+                        "hops",
+                        0,
+                    )
+                )
+                + 1
+            )
+
+            action_response = (
+                self._format_result(
+                    result
+                )
+            )
+
+            continuation_response = (
+                self._continue_browser_agent()
+            )
+
+            return (
+                action_response
+                + "\n\n"
+                + continuation_response
             )
 
         # ---------------------------------
