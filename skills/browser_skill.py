@@ -950,6 +950,143 @@ class BrowserSkill:
             ),
         }
 
+    def _plan_click_continuation_goal(
+        self,
+        message,
+    ):
+        """
+        Plan one verified click followed by observation of
+        the page that exists after the click.
+        """
+
+        message = str(
+            message or ""
+        ).strip()
+
+        match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)'
+            r'(?:,\s*|\s+and\s+)'
+            r'click\s+'
+            r'(.+?)'
+            r'(?:,\s*|\s+)'
+            r'then\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        site = (
+            match.group(1)
+            .strip()
+            .strip('"')
+        )
+
+        requested_target = (
+            match.group(2)
+            .strip()
+            .strip('"')
+        )
+
+        continuation = (
+            match.group(3)
+            .strip()
+            .lower()
+            .rstrip(".")
+        )
+
+        status_requests = (
+            "tell me what page it opened",
+            "tell me what page opened",
+            "show me what page it opened",
+            "show me what page opened",
+            "tell me where it went",
+            "show me where it went",
+        )
+
+        inspect_requests = (
+            "inspect the page",
+            "inspect page",
+            "show page elements",
+            "show me the page elements",
+        )
+
+        if (
+            continuation not in status_requests
+            and continuation not in inspect_requests
+        ):
+            return None
+
+        page = self._prepare_goal_page(
+            site
+        )
+
+        if not page.get(
+            "success",
+            False,
+        ):
+            return page
+
+        target, error = (
+            self._goal_named_element_candidate(
+                page["elements"],
+                requested_target,
+            )
+        )
+
+        if error:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning "
+                    "stopped.\n"
+                    + error
+                ),
+            }
+
+        if '"' in target:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser goal planning stopped.\n"
+                    "The target contains an unsupported "
+                    "quote character."
+                ),
+            }
+
+        if continuation in inspect_requests:
+
+            workflow_request = (
+                f'browser click "{target}"'
+                f' then inspect page'
+            )
+
+        else:
+
+            workflow_request = (
+                f'browser click "{target}"'
+                f' then inspect page'
+                f' then browser status'
+            )
+
+        return {
+            "success": True,
+            "site": site,
+            "url": page["url"],
+            "title": page["title"],
+            "field": None,
+            "target": target,
+            "continuation": True,
+            "workflow_request": (
+                workflow_request
+            ),
+        }
+
     def plan_natural_browser_goal(
         self,
         message,
@@ -968,6 +1105,15 @@ class BrowserSkill:
         Every target is checked against the live DOM before
         a workflow is created.
         """
+
+        continuation_goal = (
+            self._plan_click_continuation_goal(
+                message
+            )
+        )
+
+        if continuation_goal is not None:
+            return continuation_goal
 
         existing_search = (
             self.plan_natural_search_goal(

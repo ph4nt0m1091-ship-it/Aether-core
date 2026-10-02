@@ -986,15 +986,59 @@ class Brain:
                         "was executed."
                     )
 
+                detail_lines = []
+
+                if browser_plan.get(
+                    "field"
+                ):
+
+                    detail_lines.append(
+                        "Field: "
+                        + str(
+                            browser_plan.get(
+                                "field"
+                            )
+                        )
+                    )
+
+                if browser_plan.get(
+                    "target"
+                ):
+
+                    detail_lines.append(
+                        "Target: "
+                        + str(
+                            browser_plan.get(
+                                "target"
+                            )
+                        )
+                    )
+
+                if browser_plan.get(
+                    "continuation"
+                ):
+
+                    detail_lines.append(
+                        "After action: re-inspect "
+                        "the live page"
+                    )
+
+                details = "\n".join(
+                    detail_lines
+                )
+
                 return (
                     "Aether: Browser goal planned from "
                     "live page elements.\n"
                     f"Page: "
-                    f"{browser_plan.get('title') or browser_plan.get('url')}\n"
-                    f"Search field: "
-                    f"{browser_plan.get('field')}\n"
-                    f"Search action: "
-                    f"{browser_plan.get('target')}\n\n"
+                    f"{browser_plan.get('title') or browser_plan.get('url')}"
+                    + (
+                        "\n"
+                        + details
+                        if details
+                        else ""
+                    )
+                    + "\n\n"
                     + workflow_response
                 )
 
