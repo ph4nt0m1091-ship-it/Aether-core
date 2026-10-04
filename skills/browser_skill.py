@@ -76,6 +76,10 @@ class BrowserSkill:
         self.agent_goal = None
         self.agent_max_hops = 3
 
+        # Visible non-navigation page text used only for
+        # deterministic goal verification.
+        self.agent_content_char_limit = 8000
+
     # ---------------------------------
     # NATURAL BROWSER GOAL PLANNING
     # ---------------------------------
@@ -994,6 +998,71 @@ class BrowserSkill:
             )
         ]
 
+    def _agent_visible_page_text(
+        self,
+    ):
+        """
+        Read visible page content for goal verification.
+
+        Navigation and interactive controls are removed first
+        so a link named after the goal does not by itself prove
+        that the current page satisfies the goal.
+        """
+
+        try:
+
+            page = (
+                self.provider
+                ._ensure_page()
+            )
+
+            content = page.evaluate(
+                """() => {
+                    const source =
+                        document.querySelector('main')
+                        || document.querySelector('article')
+                        || document.body;
+
+                    if (!source) {
+                        return '';
+                    }
+
+                    const clone =
+                        source.cloneNode(true);
+
+                    const remove =
+                        'script, style, noscript, '
+                        + 'nav, header, footer, '
+                        + 'a, button, input, '
+                        + 'textarea, select, option, '
+                        + '[role="button"], '
+                        + '[role="link"]';
+
+                    clone
+                        .querySelectorAll(remove)
+                        .forEach(
+                            element => element.remove()
+                        );
+
+                    return (
+                        clone.textContent || ''
+                    )
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                }"""
+            )
+
+        except Exception:
+            return ""
+
+        content = str(
+            content or ""
+        ).strip()
+
+        return content[
+            :self.agent_content_char_limit
+        ]
+
     def _agent_snapshot(
         self,
     ):
@@ -1043,35 +1112,137 @@ class BrowserSkill:
                 "elements",
                 [],
             ),
+            "visible_text": (
+                self._agent_visible_page_text()
+            ),
         }
 
-    def _agent_goal_is_complete(
+    def _agent_goal_evidence(
         self,
         goal,
         title,
         url,
+        visible_text,
     ):
-        tokens = self._agent_goal_tokens(
-            goal
+        """
+        Return deterministic evidence that the current page
+        satisfies the browser goal.
+
+        Strong evidence:
+        1. every goal token exists in title / URL, or
+        2. the normalized goal phrase exists in non-navigation
+           visible page content.
+
+        This does not ask a language model to decide whether
+        the page is relevant.
+        """
+
+        tokens = (
+            self._agent_goal_tokens(
+                goal
+            )
         )
 
         if not tokens:
-            return False
 
-        page_tokens = set(
+            return {
+                "complete": False,
+            }
+
+        title_url = (
             self._normalize_goal_label(
                 (
                     str(title or "")
                     + " "
                     + str(url or "")
                 )
-            ).split()
+            )
         )
 
-        return all(
-            token in page_tokens
-            for token in tokens
+        title_url_tokens = set(
+            title_url.split()
         )
+
+        if all(
+            token in title_url_tokens
+            for token in tokens
+        ):
+
+            return {
+                "complete": True,
+                "source": "page title or URL",
+                "excerpt": (
+                    str(title or "")
+                    or str(url or "")
+                ),
+            }
+
+        content = (
+            self._normalize_goal_label(
+                visible_text
+            )
+        )
+
+        goal_phrase = " ".join(
+            tokens
+        )
+
+        if (
+            goal_phrase
+            and goal_phrase in content
+        ):
+
+            raw_content = str(
+                visible_text or ""
+            )
+
+            normalized_raw = (
+                raw_content.lower()
+            )
+
+            first_token = (
+                tokens[0]
+                if tokens
+                else ""
+            )
+
+            position = (
+                normalized_raw.find(
+                    first_token
+                )
+            )
+
+            if position < 0:
+                position = 0
+
+            start = max(
+                0,
+                position - 80,
+            )
+
+            end = min(
+                len(raw_content),
+                position + 260,
+            )
+
+            excerpt = (
+                raw_content[
+                    start:end
+                ]
+                .strip()
+            )
+
+            return {
+                "complete": True,
+                "source": (
+                    "visible page content"
+                ),
+                "excerpt": excerpt,
+            }
+
+        return {
+            "complete": False,
+        }
 
     def _agent_choose_target(
         self,
@@ -1332,13 +1503,24 @@ class BrowserSkill:
             "",
         )
 
-        if self._agent_goal_is_complete(
-            state.get(
-                "goal",
-                "",
-            ),
-            title,
-            url,
+        evidence = (
+            self._agent_goal_evidence(
+                state.get(
+                    "goal",
+                    "",
+                ),
+                title,
+                url,
+                snapshot.get(
+                    "visible_text",
+                    "",
+                ),
+            )
+        )
+
+        if evidence.get(
+            "complete",
+            False,
         ):
             hops = state.get(
                 "hops",
@@ -1350,15 +1532,45 @@ class BrowserSkill:
                 "",
             )
 
+            source = evidence.get(
+                "source",
+                "verified page evidence",
+            )
+
+            excerpt = str(
+                evidence.get(
+                    "excerpt",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if len(excerpt) > 300:
+                excerpt = (
+                    excerpt[:297]
+                    .rstrip()
+                    + "..."
+                )
+
             self.agent_goal = None
 
-            return (
+            output = (
                 "Aether: Browser goal completed.\n"
                 f"Goal: {goal}\n"
                 f"Title: {title}\n"
                 f"URL: {url}\n"
+                f"Verified by: {source}\n"
                 f"Approved clicks used: {hops}"
             )
+
+            if excerpt:
+
+                output += (
+                    "\nEvidence: "
+                    + excerpt
+                )
+
+            return output
 
         if (
             state.get(
@@ -1467,7 +1679,8 @@ class BrowserSkill:
         match = re.match(
             r'^(?:go to|visit|open)\s+'
             r'(.+?)\s+and\s+'
-            r'find\s+(?:the\s+)?page\s+about\s+'
+            r'find\s+(?:the\s+|a\s+)?page\s+'
+            r'(?:about|explaining|that\s+explains)\s+'
             r'(.+)$',
             message,
             re.IGNORECASE,
@@ -1543,6 +1756,9 @@ class BrowserSkill:
             "elements": page.get(
                 "elements",
                 [],
+            ),
+            "visible_text": (
+                self._agent_visible_page_text()
             ),
         }
 
