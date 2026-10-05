@@ -78,7 +78,7 @@ class BrowserSkill:
 
         # Visible non-navigation page text used only for
         # deterministic goal verification.
-        self.agent_content_char_limit = 8000
+        self.agent_content_char_limit = 20000
 
     # ---------------------------------
     # NATURAL BROWSER GOAL PLANNING
@@ -1222,6 +1222,487 @@ class BrowserSkill:
             len(goal_tokens),
         )
 
+    def _agent_sentence_chunks(
+        self,
+        visible_text,
+    ):
+        """
+        Split readable page text into deterministic chunks.
+
+        This intentionally does not ask a model to invent or
+        reconstruct missing information.
+        """
+
+        raw = str(
+            visible_text or ""
+        ).strip()
+
+        if not raw:
+            return []
+
+        raw = re.sub(
+            r"\s+",
+            " ",
+            raw,
+        )
+
+        pieces = re.split(
+            r'(?<=[.!?])\s+',
+            raw,
+        )
+
+        chunks = []
+
+        for piece in pieces:
+
+            piece = piece.strip()
+
+            if len(piece) < 20:
+                continue
+
+            if len(piece) > 700:
+                piece = piece[:700].rstrip()
+
+            chunks.append(
+                piece
+            )
+
+        return chunks
+
+    def _agent_query_tokens(
+        self,
+        query,
+    ):
+        tokens = (
+            self._agent_goal_tokens(
+                query
+            )
+        )
+
+        generic = {
+            "tell",
+            "what",
+            "which",
+            "me",
+            "summarize",
+            "summary",
+            "option",
+            "information",
+            "info",
+            "says",
+            "say",
+        }
+
+        return [
+            token
+            for token in tokens
+            if token not in generic
+        ]
+
+    def _agent_relevant_passages(
+        self,
+        visible_text,
+        query,
+        limit=4,
+    ):
+        chunks = (
+            self._agent_sentence_chunks(
+                visible_text
+            )
+        )
+
+        if not chunks:
+            return []
+
+        query_tokens = (
+            self._agent_query_tokens(
+                query
+            )
+        )
+
+        if not query_tokens:
+
+            return chunks[:limit]
+
+        ranked = []
+
+        for index, chunk in enumerate(
+            chunks
+        ):
+
+            normalized = (
+                self._normalize_goal_label(
+                    chunk
+                )
+            )
+
+            candidate_tokens = (
+                normalized.split()
+            )
+
+            matched, total = (
+                self._agent_match_goal_tokens(
+                    query,
+                    candidate_tokens,
+                )
+            )
+
+            score = (
+                len(matched)
+                * 100
+            )
+
+            exact_hits = sum(
+                1
+                for token in query_tokens
+                if token in candidate_tokens
+            )
+
+            score += (
+                exact_hits
+                * 60
+            )
+
+            if score > 0:
+
+                ranked.append(
+                    (
+                        score,
+                        index,
+                        chunk,
+                    )
+                )
+
+        ranked.sort(
+            key=lambda item: (
+                -item[0],
+                item[1],
+            )
+        )
+
+        output = []
+
+        for _, _, chunk in ranked:
+
+            if chunk in output:
+                continue
+
+            output.append(
+                chunk
+            )
+
+            if len(output) >= limit:
+                break
+
+        return output
+
+    def _agent_extract_prices(
+        self,
+        visible_text,
+    ):
+        """
+        Extract simple dollar prices with nearby source text.
+
+        This is intentionally narrow. If Aether cannot verify
+        a price directly from page text, it does not invent one.
+        """
+
+        chunks = (
+            self._agent_sentence_chunks(
+                visible_text
+            )
+        )
+
+        results = []
+
+        pattern = re.compile(
+            r'(?<!\w)\$'
+            r'([0-9]+(?:,[0-9]{3})*'
+            r'(?:\.[0-9]{1,2})?)'
+        )
+
+        for chunk in chunks:
+
+            for match in pattern.finditer(
+                chunk
+            ):
+
+                raw_number = (
+                    match.group(1)
+                    .replace(
+                        ",",
+                        "",
+                    )
+                )
+
+                try:
+                    value = float(
+                        raw_number
+                    )
+
+                except ValueError:
+                    continue
+
+                results.append(
+                    {
+                        "value": value,
+                        "display": (
+                            "$"
+                            + match.group(1)
+                        ),
+                        "evidence": chunk,
+                    }
+                )
+
+        return results
+
+    def _agent_answer_page_question(
+        self,
+        visible_text,
+        question,
+        title,
+        url,
+    ):
+        question = str(
+            question or ""
+        ).strip()
+
+        if not question:
+
+            return (
+                "Aether: Page reached successfully."
+            )
+
+        lower = question.lower()
+
+        # ---------------------------------
+        # LOWEST / CHEAPEST PRICE
+        # ---------------------------------
+
+        if any(
+            phrase in lower
+            for phrase in (
+                "cheapest",
+                "lowest price",
+                "least expensive",
+                "lowest cost",
+            )
+        ):
+
+            prices = (
+                self._agent_extract_prices(
+                    visible_text
+                )
+            )
+
+            if not prices:
+
+                return (
+                    "Aether: I reached the requested page, "
+                    "but I could not verify a dollar price "
+                    "from the visible page content.\n"
+                    f"Title: {title}\n"
+                    f"URL: {url}"
+                )
+
+            cheapest = min(
+                prices,
+                key=lambda item: (
+                    item["value"]
+                ),
+            )
+
+            return (
+                "Aether: Page answer\n"
+                f"Answer: Lowest visible price found: "
+                f"{cheapest['display']}\n"
+                f"Title: {title}\n"
+                f"URL: {url}\n"
+                "Evidence: "
+                + cheapest[
+                    "evidence"
+                ]
+            )
+
+        # ---------------------------------
+        # SUMMARY / GENERAL PAGE QUESTION
+        # ---------------------------------
+
+        passages = (
+            self._agent_relevant_passages(
+                visible_text,
+                question,
+                limit=4,
+            )
+        )
+
+        if not passages:
+
+            return (
+                "Aether: I reached the requested page, "
+                "but I could not find enough visible page "
+                "evidence to answer that request safely.\n"
+                f"Title: {title}\n"
+                f"URL: {url}"
+            )
+
+        if (
+            "summarize" in lower
+            or "summary" in lower
+        ):
+
+            answer_label = (
+                "Relevant page summary"
+            )
+
+        else:
+
+            answer_label = (
+                "Relevant page information"
+            )
+
+        output = (
+            "Aether: Page answer\n"
+            f"{answer_label}:\n"
+        )
+
+        for passage in passages:
+
+            output += (
+                "- "
+                + passage
+                + "\n"
+            )
+
+        output += (
+            f"\nTitle: {title}\n"
+            f"URL: {url}"
+        )
+
+        return output.rstrip()
+
+    def _agent_finish_goal(
+        self,
+        state,
+        evidence,
+        title,
+        url,
+        visible_text,
+    ):
+        hops = state.get(
+            "hops",
+            0,
+        )
+
+        goal = state.get(
+            "goal",
+            "",
+        )
+
+        source = evidence.get(
+            "source",
+            "verified page evidence",
+        )
+
+        excerpt = str(
+            evidence.get(
+                "excerpt",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if len(excerpt) > 300:
+
+            excerpt = (
+                excerpt[:297]
+                .rstrip()
+                + "..."
+            )
+
+        output = (
+            "Aether: Browser goal completed.\n"
+            f"Goal: {goal}\n"
+            f"Title: {title}\n"
+            f"URL: {url}\n"
+            f"Verified by: {source}\n"
+            f"Approved clicks used: {hops}"
+        )
+
+        matched = evidence.get(
+            "matched",
+            [],
+        )
+
+        if matched:
+
+            match_text = []
+
+            for (
+                goal_word,
+                matched_word,
+                match_type,
+            ) in matched:
+
+                if (
+                    goal_word
+                    == matched_word
+                ):
+
+                    match_text.append(
+                        goal_word
+                    )
+
+                else:
+
+                    match_text.append(
+                        (
+                            goal_word
+                            + "?"
+                            + matched_word
+                        )
+                    )
+
+            if match_text:
+
+                output += (
+                    "\nMatched concepts: "
+                    + ", ".join(
+                        match_text
+                    )
+                )
+
+        if excerpt:
+
+            output += (
+                "\nEvidence: "
+                + excerpt
+            )
+
+        follow_up = str(
+            state.get(
+                "follow_up",
+                "",
+            )
+            or ""
+        ).strip()
+
+        self.agent_goal = None
+
+        if follow_up:
+
+            output += (
+                "\n\n"
+                + self._agent_answer_page_question(
+                    visible_text,
+                    follow_up,
+                    title,
+                    url,
+                )
+            )
+
+        return output
+
     def _agent_page_key(
         self,
         title,
@@ -2155,98 +2636,14 @@ class BrowserSkill:
             "complete",
             False,
         ):
-            hops = state.get(
-                "hops",
-                0,
+
+            return self._agent_finish_goal(
+                state,
+                evidence,
+                title,
+                url,
+                visible_text,
             )
-
-            goal = state.get(
-                "goal",
-                "",
-            )
-
-            source = evidence.get(
-                "source",
-                "verified page evidence",
-            )
-
-            excerpt = str(
-                evidence.get(
-                    "excerpt",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if len(excerpt) > 300:
-                excerpt = (
-                    excerpt[:297]
-                    .rstrip()
-                    + "..."
-                )
-
-            self.agent_goal = None
-
-            output = (
-                "Aether: Browser goal completed.\n"
-                f"Goal: {goal}\n"
-                f"Title: {title}\n"
-                f"URL: {url}\n"
-                f"Verified by: {source}\n"
-                f"Approved clicks used: {hops}"
-            )
-
-            matched = evidence.get(
-                "matched",
-                [],
-            )
-
-            if matched:
-
-                match_text = []
-
-                for (
-                    goal_word,
-                    matched_word,
-                    match_type,
-                ) in matched:
-
-                    if (
-                        goal_word
-                        == matched_word
-                    ):
-
-                        match_text.append(
-                            goal_word
-                        )
-
-                    else:
-
-                        match_text.append(
-                            (
-                                goal_word
-                                + "?"
-                                + matched_word
-                            )
-                        )
-
-                if match_text:
-
-                    output += (
-                        "\nMatched concepts: "
-                        + ", ".join(
-                            match_text
-                        )
-                    )
-
-            if excerpt:
-
-                output += (
-                    "\nEvidence: "
-                    + excerpt
-                )
-
-            return output
 
         if (
             state.get(
@@ -2379,13 +2776,43 @@ class BrowserSkill:
             .strip('"')
         )
 
-        goal = (
+        raw_goal = (
             match.group(2)
             .strip()
             .strip('"')
             .rstrip(".")
             .strip()
         )
+
+        follow_up = ""
+
+        follow_up_match = re.match(
+            r'^(.*?)\s+and\s+'
+            r'('
+            r'tell\s+me\s+.+'
+            r'|summarize\s+.+'
+            r')$',
+            raw_goal,
+            re.IGNORECASE,
+        )
+
+        if follow_up_match:
+
+            goal = (
+                follow_up_match
+                .group(1)
+                .strip()
+            )
+
+            follow_up = (
+                follow_up_match
+                .group(2)
+                .strip()
+            )
+
+        else:
+
+            goal = raw_goal
 
         if not goal:
 
@@ -2414,6 +2841,7 @@ class BrowserSkill:
         self.agent_goal = {
             "goal": goal,
             "site": site,
+            "follow_up": follow_up,
             "hops": 0,
             "max_hops": self.agent_max_hops,
             "history": [],
