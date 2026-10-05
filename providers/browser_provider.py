@@ -483,7 +483,8 @@ class BrowserProvider:
                 title: element.getAttribute('title') || '',
                 id: element.id || '',
                 name: element.getAttribute('name') || '',
-                type: (element.getAttribute('type') || '').toLowerCase()
+                type: (element.getAttribute('type') || '').toLowerCase(),
+                href: element.href || ''
             })"""
         )
 
@@ -559,12 +560,76 @@ class BrowserProvider:
         )
 
         if len(matches) != 1:
-            return self._failure(
-                f'I could not find exactly one enabled visible '
-                f'element named "{target}". I will not guess.'
-            )
 
-        locator, data = matches[0]
+            # Multiple visible links with the exact same name
+            # are allowed only when every match resolves to
+            # the same non-empty destination URL.
+            #
+            # Example:
+            # desktop + responsive navigation may expose two
+            # "Documentation" links that both go to the same
+            # documentation page.
+            #
+            # Different destinations remain ambiguous and are
+            # refused rather than guessed.
+
+            if len(matches) > 1:
+
+                hrefs = {
+                    str(
+                        data.get(
+                            "href",
+                            "",
+                        )
+                    ).strip()
+                    for _, data in matches
+                    if str(
+                        data.get(
+                            "href",
+                            "",
+                        )
+                    ).strip()
+                }
+
+                all_are_links = all(
+                    str(
+                        data.get(
+                            "tag",
+                            "",
+                        )
+                    ).lower()
+                    == "a"
+                    for _, data in matches
+                )
+
+                if (
+                    all_are_links
+                    and len(hrefs) == 1
+                ):
+
+                    locator, data = (
+                        matches[0]
+                    )
+
+                else:
+
+                    return self._failure(
+                        f'I found {len(matches)} enabled visible '
+                        f'elements named "{target}" with '
+                        "different or unverifiable destinations. "
+                        "I will not guess."
+                    )
+
+            else:
+
+                return self._failure(
+                    f'I could not find exactly one enabled visible '
+                    f'element named "{target}". I will not guess.'
+                )
+
+        else:
+
+            locator, data = matches[0]
 
         before_url = self._ensure_page().url
 

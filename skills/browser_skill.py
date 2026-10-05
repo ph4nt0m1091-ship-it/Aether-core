@@ -987,6 +987,9 @@ class BrowserSkill:
             "reach",
             "the",
             "to",
+            "that",
+            "explains",
+            "explaining",
         }
 
         return [
@@ -997,6 +1000,268 @@ class BrowserSkill:
                 and token not in stop_words
             )
         ]
+
+    def _agent_concept_groups(
+        self,
+    ):
+        """
+        Small deterministic synonym families.
+
+        These are intentionally curated instead of asking
+        a language model whether two words are related.
+        """
+
+        return (
+            {
+                "pricing",
+                "price",
+                "prices",
+                "plan",
+                "plans",
+                "cost",
+                "costs",
+                "fee",
+                "fees",
+                "subscription",
+                "subscriptions",
+            },
+            {
+                "support",
+                "help",
+                "assistance",
+                "service",
+            },
+            {
+                "contact",
+                "contacts",
+                "reach",
+                "email",
+            },
+            {
+                "docs",
+                "doc",
+                "documentation",
+                "guide",
+                "guides",
+                "manual",
+                "manuals",
+                "reference",
+            },
+            {
+                "download",
+                "downloads",
+                "installer",
+                "install",
+                "setup",
+            },
+            {
+                "feature",
+                "features",
+                "capability",
+                "capabilities",
+            },
+            {
+                "security",
+                "secure",
+                "safety",
+            },
+            {
+                "privacy",
+                "private",
+            },
+            {
+                "job",
+                "jobs",
+                "career",
+                "careers",
+                "employment",
+            },
+            {
+                "login",
+                "signin",
+                "sign",
+                "account",
+            },
+        )
+
+    def _agent_token_variants(
+        self,
+        token,
+    ):
+        token = (
+            self._normalize_goal_label(
+                token
+            )
+        )
+
+        if not token:
+            return set()
+
+        variants = {
+            token,
+        }
+
+        # ---------------------------------
+        # SIMPLE SINGULAR / PLURAL SUPPORT
+        # ---------------------------------
+
+        if (
+            token.endswith("ies")
+            and len(token) > 4
+        ):
+
+            variants.add(
+                token[:-3]
+                + "y"
+            )
+
+        elif (
+            token.endswith("s")
+            and len(token) > 3
+        ):
+
+            variants.add(
+                token[:-1]
+            )
+
+        else:
+
+            variants.add(
+                token
+                + "s"
+            )
+
+        # ---------------------------------
+        # CURATED CONCEPT GROUPS
+        # ---------------------------------
+
+        for group in (
+            self._agent_concept_groups()
+        ):
+
+            if variants & group:
+
+                variants.update(
+                    group
+                )
+
+        return variants
+
+    def _agent_match_goal_tokens(
+        self,
+        goal,
+        candidate_tokens,
+    ):
+        """
+        Match each goal concept against candidate words.
+
+        Returns:
+        - matched count
+        - total concept count
+        - human-readable matched pairs
+        """
+
+        goal_tokens = (
+            self._agent_goal_tokens(
+                goal
+            )
+        )
+
+        candidate_tokens = set(
+            candidate_tokens
+        )
+
+        matched = []
+
+        for goal_token in goal_tokens:
+
+            variants = (
+                self._agent_token_variants(
+                    goal_token
+                )
+            )
+
+            exact = (
+                goal_token
+                in candidate_tokens
+            )
+
+            synonym_matches = (
+                variants
+                & candidate_tokens
+            )
+
+            if exact:
+
+                matched.append(
+                    (
+                        goal_token,
+                        goal_token,
+                        "exact",
+                    )
+                )
+
+                continue
+
+            if synonym_matches:
+
+                chosen = sorted(
+                    synonym_matches
+                )[0]
+
+                matched.append(
+                    (
+                        goal_token,
+                        chosen,
+                        "related",
+                    )
+                )
+
+        return (
+            matched,
+            len(goal_tokens),
+        )
+
+    def _agent_page_key(
+        self,
+        title,
+        url,
+        visible_text,
+    ):
+        """
+        Deterministic fingerprint for loop detection.
+
+        URL + title + the beginning of non-navigation
+        content prevents ordinary same-URL page changes
+        from automatically looking identical.
+        """
+
+        normalized_title = (
+            self._normalize_goal_label(
+                title
+            )
+        )
+
+        normalized_content = (
+            self._normalize_goal_label(
+                visible_text
+            )
+        )
+
+        normalized_url = str(
+            url or ""
+        ).split(
+            "#",
+            1,
+        )[0].rstrip("/").lower()
+
+        return (
+            normalized_url
+            + "|"
+            + normalized_title
+            + "|"
+            + normalized_content[:500]
+        )
 
     def _agent_visible_page_text(
         self,
@@ -1125,31 +1390,35 @@ class BrowserSkill:
         visible_text,
     ):
         """
-        Return deterministic evidence that the current page
-        satisfies the browser goal.
+        Deterministically verify whether the current page
+        satisfies the goal.
 
-        Strong evidence:
-        1. every goal token exists in title / URL, or
-        2. the normalized goal phrase exists in non-navigation
-           visible page content.
+        Strong evidence can come from:
+        - title / URL
+        - exact phrase in page content
+        - all goal concepts appearing close together in
+          visible non-navigation content
 
-        This does not ask a language model to decide whether
-        the page is relevant.
+        Synonyms come only from Aether's curated groups.
         """
 
-        tokens = (
+        goal_tokens = (
             self._agent_goal_tokens(
                 goal
             )
         )
 
-        if not tokens:
+        if not goal_tokens:
 
             return {
                 "complete": False,
             }
 
-        title_url = (
+        # ---------------------------------
+        # TITLE / URL
+        # ---------------------------------
+
+        title_url_text = (
             self._normalize_goal_label(
                 (
                     str(title or "")
@@ -1159,90 +1428,238 @@ class BrowserSkill:
             )
         )
 
-        title_url_tokens = set(
-            title_url.split()
+        title_url_tokens = (
+            title_url_text.split()
         )
 
-        if all(
-            token in title_url_tokens
-            for token in tokens
+        matched, total = (
+            self._agent_match_goal_tokens(
+                goal,
+                title_url_tokens,
+            )
+        )
+
+        if (
+            total > 0
+            and len(matched) == total
         ):
 
             return {
                 "complete": True,
-                "source": "page title or URL",
+                "source": (
+                    "page title or URL"
+                ),
                 "excerpt": (
                     str(title or "")
                     or str(url or "")
                 ),
+                "matched": matched,
             }
 
-        content = (
+        # ---------------------------------
+        # PAGE-FINDING GOALS
+        # ---------------------------------
+        #
+        # Browser Agent currently starts from requests such as:
+        #
+        #   find the page about X
+        #
+        # For that kind of goal, body text is useful evidence
+        # for choosing the next link, but a teaser/section that
+        # merely mentions X must not prove that this is the
+        # destination page.
+        #
+        # Completion therefore requires page-identity evidence
+        # from the title or URL. Content-aware answering will
+        # use a separate goal type later.
+        # ---------------------------------
+
+        return {
+            "complete": False,
+        }
+
+        # ---------------------------------
+        # VISIBLE PAGE CONTENT
+        # ---------------------------------
+
+        normalized_content = (
             self._normalize_goal_label(
                 visible_text
             )
         )
 
-        goal_phrase = " ".join(
-            tokens
+        content_tokens = (
+            normalized_content.split()
         )
 
+        normalized_goal = (
+            self._normalize_goal_label(
+                goal
+            )
+        )
+
+        # Strongest content signal:
+        # the literal normalized phrase exists.
         if (
-            goal_phrase
-            and goal_phrase in content
+            normalized_goal
+            and normalized_goal
+            in normalized_content
         ):
-
-            raw_content = str(
-                visible_text or ""
-            )
-
-            normalized_raw = (
-                raw_content.lower()
-            )
-
-            first_token = (
-                tokens[0]
-                if tokens
-                else ""
-            )
-
-            position = (
-                normalized_raw.find(
-                    first_token
-                )
-            )
-
-            if position < 0:
-                position = 0
-
-            start = max(
-                0,
-                position - 80,
-            )
-
-            end = min(
-                len(raw_content),
-                position + 260,
-            )
-
-            excerpt = (
-                raw_content[
-                    start:end
-                ]
-                .strip()
-            )
 
             return {
                 "complete": True,
                 "source": (
                     "visible page content"
                 ),
-                "excerpt": excerpt,
+                "excerpt": (
+                    self._agent_content_excerpt(
+                        visible_text,
+                        goal_tokens,
+                    )
+                ),
+                "matched": [
+                    (
+                        token,
+                        token,
+                        "exact",
+                    )
+                    for token in goal_tokens
+                ],
             }
+
+        # Related concepts must occur reasonably close
+        # together instead of merely somewhere within
+        # the entire 8,000-character page snapshot.
+        window_size = 60
+
+        if len(
+            content_tokens
+        ) <= window_size:
+
+            windows = [
+                content_tokens
+            ]
+
+        else:
+
+            windows = []
+
+            step = 20
+
+            for start in range(
+                0,
+                len(content_tokens),
+                step,
+            ):
+
+                window = (
+                    content_tokens[
+                        start:
+                        start + window_size
+                    ]
+                )
+
+                if not window:
+                    break
+
+                windows.append(
+                    window
+                )
+
+        for window in windows:
+
+            matched, total = (
+                self._agent_match_goal_tokens(
+                    goal,
+                    window,
+                )
+            )
+
+            if (
+                total > 0
+                and len(matched) == total
+            ):
+
+                return {
+                    "complete": True,
+                    "source": (
+                        "related concepts in visible "
+                        "page content"
+                    ),
+                    "excerpt": (
+                        self._agent_content_excerpt(
+                            visible_text,
+                            goal_tokens,
+                        )
+                    ),
+                    "matched": matched,
+                }
 
         return {
             "complete": False,
         }
+
+    def _agent_content_excerpt(
+        self,
+        visible_text,
+        goal_tokens,
+    ):
+        raw = str(
+            visible_text or ""
+        ).strip()
+
+        if not raw:
+            return ""
+
+        lower = raw.lower()
+
+        positions = []
+
+        for token in goal_tokens:
+
+            variants = (
+                self._agent_token_variants(
+                    token
+                )
+            )
+
+            for variant in variants:
+
+                position = lower.find(
+                    variant.lower()
+                )
+
+                if position >= 0:
+                    positions.append(
+                        position
+                    )
+
+        if positions:
+
+            position = min(
+                positions
+            )
+
+        else:
+
+            position = 0
+
+        start = max(
+            0,
+            position - 80,
+        )
+
+        end = min(
+            len(raw),
+            position + 300,
+        )
+
+        return (
+            raw[
+                start:end
+            ]
+            .strip()
+        )
 
     def _agent_choose_target(
         self,
@@ -1257,6 +1674,7 @@ class BrowserSkill:
         )
 
         if not goal_tokens:
+
             return (
                 None,
                 None,
@@ -1264,12 +1682,25 @@ class BrowserSkill:
                 "enough specific words to plan safely."
             )
 
-        state = self.agent_goal or {}
+        state = (
+            self.agent_goal
+            or {}
+        )
 
         used_pairs = {
             (
-                str(item.get("url", "")),
-                str(item.get("target", "")),
+                str(
+                    item.get(
+                        "url",
+                        "",
+                    )
+                ),
+                str(
+                    item.get(
+                        "target",
+                        "",
+                    )
+                ),
             )
             for item in state.get(
                 "history",
@@ -1282,6 +1713,12 @@ class BrowserSkill:
         }
 
         candidates = []
+
+        normalized_goal = (
+            self._normalize_goal_label(
+                goal
+            )
+        )
 
         for item in elements:
 
@@ -1325,35 +1762,109 @@ class BrowserSkill:
             ) in used_pairs:
                 continue
 
-            label_tokens = set(
+            normalized_label = (
                 self._normalize_goal_label(
                     label
-                ).split()
+                )
             )
 
-            overlap = sum(
-                1
-                for token in goal_tokens
-                if token in label_tokens
+            label_tokens = (
+                normalized_label.split()
             )
 
-            score = overlap * 100
+            matched, total = (
+                self._agent_match_goal_tokens(
+                    goal,
+                    label_tokens,
+                )
+            )
 
+            score = 0
+
+            reasons = []
+
+            # Exact whole-goal phrase is strongest.
             if (
-                overlap
-                == len(goal_tokens)
+                normalized_goal
+                and normalized_goal
+                == normalized_label
             ):
-                score += 200
+
+                score += 600
+
+                reasons.append(
+                    "exact goal phrase"
+                )
+
+            elif (
+                normalized_goal
+                and normalized_goal
+                in normalized_label
+            ):
+
+                score += 350
+
+                reasons.append(
+                    "goal phrase appears in label"
+                )
+
+            # Individual concept matches.
+            for (
+                goal_word,
+                matched_word,
+                match_type,
+            ) in matched:
+
+                if match_type == "exact":
+
+                    score += 140
+
+                else:
+
+                    score += 95
+
+                if (
+                    goal_word
+                    == matched_word
+                ):
+
+                    reasons.append(
+                        goal_word
+                    )
+
+                else:
+
+                    reasons.append(
+                        (
+                            goal_word
+                            + "?"
+                            + matched_word
+                        )
+                    )
+
+            # Reward complete concept coverage.
+            if (
+                total > 0
+                and len(matched) == total
+            ):
+
+                score += 250
+
+                reasons.append(
+                    "all goal concepts matched"
+                )
 
             candidates.append(
                 {
                     "label": label,
                     "score": score,
-                    "overlap": overlap,
+                    "matched": matched,
+                    "reason_parts": reasons,
                 }
             )
 
         if not candidates:
+
             return (
                 None,
                 None,
@@ -1364,72 +1875,139 @@ class BrowserSkill:
         matching = [
             item
             for item in candidates
-            if item["score"] > 0
+            if item[
+                "score"
+            ] > 0
         ]
 
         if matching:
 
             best_score = max(
-                item["score"]
+                item[
+                    "score"
+                ]
                 for item in matching
             )
 
             best = [
                 item
                 for item in matching
-                if item["score"] == best_score
+                if item[
+                    "score"
+                ] == best_score
             ]
 
             unique = []
 
             for item in best:
 
-                if item["label"] not in unique:
+                if (
+                    item["label"]
+                    not in unique
+                ):
+
                     unique.append(
-                        item["label"]
+                        item[
+                            "label"
+                        ]
                     )
 
             if len(unique) != 1:
 
+                tied = ", ".join(
+                    unique[:5]
+                )
+
                 return (
                     None,
                     None,
-                    "Multiple live page elements are "
-                    "equally good matches. I will not guess."
+                    (
+                        "Multiple live page elements "
+                        "have the same best relevance score "
+                        f"({best_score}): {tied}. "
+                        "I will not guess."
+                    ),
+                )
+
+            winner = best[0]
+
+            reason_parts = (
+                winner.get(
+                    "reason_parts",
+                    [],
+                )
+            )
+
+            if reason_parts:
+
+                reason = (
+                    "matched "
+                    + ", ".join(
+                        reason_parts
+                    )
+                    + f" (score {best_score})"
+                )
+
+            else:
+
+                reason = (
+                    "best deterministic relevance "
+                    f"score ({best_score})"
                 )
 
             return (
-                unique[0],
-                "goal words match the live element",
+                winner[
+                    "label"
+                ],
+                reason,
                 None,
             )
 
-        # If there is exactly one possible clickable element,
-        # Aether may use it as a bounded exploratory step.
-        # Multiple unexplained options are never guessed.
+        # ---------------------------------
+        # SAFE EXPLORATION
+        # ---------------------------------
+        #
+        # If there is exactly one possible clickable
+        # element, preserve v4's bounded exploration.
+        # If there is more than one unexplained choice,
+        # stop instead of guessing.
+        # ---------------------------------
+
         unique = []
 
         for item in candidates:
 
-            if item["label"] not in unique:
+            if (
+                item["label"]
+                not in unique
+            ):
+
                 unique.append(
-                    item["label"]
+                    item[
+                        "label"
+                    ]
                 )
 
         if len(unique) == 1:
 
             return (
                 unique[0],
-                "it is the only unused visible clickable option",
+                (
+                    "it is the only unused visible "
+                    "clickable option"
+                ),
                 None,
             )
 
         return (
             None,
             None,
-            "No live element matches the goal, and "
-            "multiple exploratory choices exist. "
-            "I will not guess."
+            (
+                "No live element has a strong enough "
+                "deterministic relationship to the goal, "
+                "and multiple exploratory choices exist. "
+                "I will not guess."
+            ),
         )
 
     def _agent_permission_message(
@@ -1503,6 +2081,61 @@ class BrowserSkill:
             "",
         )
 
+        visible_text = snapshot.get(
+            "visible_text",
+            "",
+        )
+
+        # ---------------------------------
+        # LOOP DETECTION
+        # ---------------------------------
+
+        page_key = (
+            self._agent_page_key(
+                title,
+                url,
+                visible_text,
+            )
+        )
+
+        visited_pages = (
+            state.setdefault(
+                "visited_pages",
+                [],
+            )
+        )
+
+        if (
+            page_key in visited_pages
+            and state.get(
+                "hops",
+                0,
+            ) > 0
+        ):
+
+            goal = state.get(
+                "goal",
+                "",
+            )
+
+            self.agent_goal = None
+
+            return (
+                "Aether: Browser goal agent stopped safely.\n"
+                f"Goal: {goal}\n"
+                "Reason: the browser returned to a page "
+                "state that Aether already inspected. "
+                "Continuing could create a loop.\n"
+                f"Title: {title}\n"
+                f"URL: {url}"
+            )
+
+        if page_key not in visited_pages:
+
+            visited_pages.append(
+                page_key
+            )
+
         evidence = (
             self._agent_goal_evidence(
                 state.get(
@@ -1562,6 +2195,49 @@ class BrowserSkill:
                 f"Verified by: {source}\n"
                 f"Approved clicks used: {hops}"
             )
+
+            matched = evidence.get(
+                "matched",
+                [],
+            )
+
+            if matched:
+
+                match_text = []
+
+                for (
+                    goal_word,
+                    matched_word,
+                    match_type,
+                ) in matched:
+
+                    if (
+                        goal_word
+                        == matched_word
+                    ):
+
+                        match_text.append(
+                            goal_word
+                        )
+
+                    else:
+
+                        match_text.append(
+                            (
+                                goal_word
+                                + "?"
+                                + matched_word
+                            )
+                        )
+
+                if match_text:
+
+                    output += (
+                        "\nMatched concepts: "
+                        + ", ".join(
+                            match_text
+                        )
+                    )
 
             if excerpt:
 
@@ -1741,6 +2417,7 @@ class BrowserSkill:
             "hops": 0,
             "max_hops": self.agent_max_hops,
             "history": [],
+            "visited_pages": [],
         }
 
         snapshot = {
