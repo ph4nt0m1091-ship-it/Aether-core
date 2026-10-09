@@ -1052,7 +1052,11 @@ class BrowserSkill:
                 "downloads",
                 "installer",
                 "install",
+                "installs",
+                "installing",
+                "installation",
                 "setup",
+                "setups",
             },
             {
                 "feature",
@@ -1260,8 +1264,12 @@ class BrowserSkill:
             if len(piece) < 20:
                 continue
 
-            if len(piece) > 700:
-                piece = piece[:700].rstrip()
+            # Huge sentence-like blocks are commonly
+            # navigation menus or documentation indexes.
+            # They may contain many requested keywords without
+            # actually explaining the topic.
+            if len(piece) > 500:
+                continue
 
             chunks.append(
                 piece
@@ -1702,6 +1710,561 @@ class BrowserSkill:
             )
 
         return output
+
+    def _agent_research_query(
+        self,
+        follow_up,
+    ):
+        """
+        Reduce a follow-up request to concepts useful for
+        selecting the next research page.
+
+        Example:
+            summarize installing Python modules
+
+        becomes roughly:
+            installing python modules
+        """
+
+        tokens = (
+            self._agent_query_tokens(
+                follow_up
+            )
+        )
+
+        generic = {
+            "how",
+            "why",
+            "when",
+            "where",
+            "who",
+            "does",
+            "do",
+            "did",
+            "is",
+            "are",
+            "was",
+            "were",
+            "it",
+            "this",
+            "that",
+            "there",
+            "from",
+            "page",
+            "pages",
+            "say",
+            "says",
+            "said",
+        }
+
+        tokens = [
+            token
+            for token in tokens
+            if token not in generic
+        ]
+
+        return " ".join(tokens).strip()
+
+    def _agent_research_passages(
+        self,
+        visible_text,
+        follow_up,
+        limit=4,
+    ):
+        """
+        Return only passages with strong concept coverage.
+
+        Research questions are stricter than ordinary page
+        relevance. A passage that merely says "Python" must
+        not satisfy a request about installing Python modules.
+        """
+
+        research_query = (
+            self._agent_research_query(
+                follow_up
+            )
+        )
+
+        query_tokens = (
+            self._agent_goal_tokens(
+                research_query
+            )
+        )
+
+        if not query_tokens:
+            return []
+
+        total_concepts = len(
+            query_tokens
+        )
+
+        # Require meaningful coverage instead of accepting
+        # any passage sharing only one broad word.
+        if total_concepts >= 3:
+
+            minimum_matches = 2
+
+        elif total_concepts == 2:
+
+            minimum_matches = 2
+
+        else:
+
+            minimum_matches = 1
+
+        chunks = (
+            self._agent_sentence_chunks(
+                visible_text
+            )
+        )
+
+        ranked = []
+
+        for index, chunk in enumerate(
+            chunks
+        ):
+
+            candidate_tokens = (
+                self._normalize_goal_label(
+                    chunk
+                ).split()
+            )
+
+            matched, total = (
+                self._agent_match_goal_tokens(
+                    research_query,
+                    candidate_tokens,
+                )
+            )
+
+            # Count distinct requested concepts.
+            matched_concepts = {
+                goal_word
+                for (
+                    goal_word,
+                    matched_word,
+                    match_type,
+                ) in matched
+            }
+
+            match_count = len(
+                matched_concepts
+            )
+
+            if (
+                match_count
+                < minimum_matches
+            ):
+
+                continue
+
+            exact_count = sum(
+                1
+                for (
+                    goal_word,
+                    matched_word,
+                    match_type,
+                ) in matched
+                if match_type == "exact"
+            )
+
+            score = (
+                match_count * 200
+                + exact_count * 80
+            )
+
+            if (
+                total > 0
+                and match_count == total
+            ):
+
+                score += 300
+
+            ranked.append(
+                (
+                    score,
+                    index,
+                    chunk,
+                )
+            )
+
+        ranked.sort(
+            key=lambda item: (
+                -item[0],
+                item[1],
+            )
+        )
+
+        output = []
+
+        for _, _, chunk in ranked:
+
+            if chunk in output:
+                continue
+
+            output.append(
+                chunk
+            )
+
+            if len(output) >= limit:
+                break
+
+        return output
+
+    def _agent_collect_research_evidence(
+        self,
+        state,
+        title,
+        url,
+        visible_text,
+    ):
+        """
+        Store relevant passages from the current page.
+
+        Evidence is tied to title + URL so the final answer
+        can show exactly where Aether found it.
+        """
+
+        follow_up = str(
+            state.get(
+                "follow_up",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not follow_up:
+            return
+
+        passages = (
+            self._agent_research_passages(
+                visible_text,
+                follow_up,
+                limit=4,
+            )
+        )
+
+        if not passages:
+            return
+
+        sources = (
+            state.setdefault(
+                "research_sources",
+                [],
+            )
+        )
+
+        normalized_url = (
+            str(url or "")
+            .split("#", 1)[0]
+            .rstrip("/")
+            .lower()
+        )
+
+        existing = None
+
+        for source in sources:
+
+            source_url = (
+                str(
+                    source.get(
+                        "url",
+                        "",
+                    )
+                )
+                .split("#", 1)[0]
+                .rstrip("/")
+                .lower()
+            )
+
+            if (
+                normalized_url
+                and source_url
+                == normalized_url
+            ):
+
+                existing = source
+                break
+
+        if existing is None:
+
+            existing = {
+                "title": str(
+                    title or ""
+                ),
+                "url": str(
+                    url or ""
+                ),
+                "passages": [],
+            }
+
+            sources.append(
+                existing
+            )
+
+        stored = (
+            existing.setdefault(
+                "passages",
+                [],
+            )
+        )
+
+        for passage in passages:
+
+            passage = str(
+                passage or ""
+            ).strip()
+
+            if (
+                passage
+                and passage not in stored
+            ):
+
+                stored.append(
+                    passage
+                )
+
+        # Keep research bounded in memory as well.
+        if len(sources) > 6:
+
+            del sources[6:]
+
+    def _agent_research_evidence_count(
+        self,
+        state,
+    ):
+        count = 0
+
+        seen = set()
+
+        for source in state.get(
+            "research_sources",
+            [],
+        ):
+
+            for passage in source.get(
+                "passages",
+                [],
+            ):
+
+                normalized = (
+                    self._normalize_goal_label(
+                        passage
+                    )
+                )
+
+                if (
+                    normalized
+                    and normalized not in seen
+                ):
+
+                    seen.add(
+                        normalized
+                    )
+
+                    count += 1
+
+        return count
+
+    def _agent_research_ready(
+        self,
+        state,
+    ):
+        """
+        Deep research finishes only after at least two
+        distinct, explanatory relevant passages exist.
+
+        A single table-of-contents or navigation block can
+        contain every keyword while still not answering the
+        research request, so one passage is never sufficient.
+        """
+
+        sources = state.get(
+            "research_sources",
+            [],
+        )
+
+        unique = []
+        seen = set()
+
+        for source in sources:
+
+            for passage in source.get(
+                "passages",
+                [],
+            ):
+
+                passage = str(
+                    passage or ""
+                ).strip()
+
+                if not passage:
+                    continue
+
+                normalized = (
+                    self._normalize_goal_label(
+                        passage
+                    )
+                )
+
+                if (
+                    not normalized
+                    or normalized in seen
+                ):
+                    continue
+
+                seen.add(
+                    normalized
+                )
+
+                unique.append(
+                    passage
+                )
+
+        return len(unique) >= 2
+
+    def _agent_render_research_answer(
+        self,
+        state,
+        title,
+        url,
+    ):
+        """
+        Produce a grounded multi-page answer.
+
+        No unsupported synthesis is invented here.
+        Aether returns the best relevant passages and the
+        pages they came from.
+        """
+
+        sources = state.get(
+            "research_sources",
+            [],
+        )
+
+        follow_up = str(
+            state.get(
+                "follow_up",
+                "",
+            )
+            or ""
+        ).strip()
+
+        original_goal = str(
+            state.get(
+                "primary_goal",
+                state.get(
+                    "goal",
+                    "",
+                ),
+            )
+        ).strip()
+
+        output = (
+            "Aether: Browser research completed.\n"
+            f"Page goal: {original_goal}\n"
+            f"Research request: {follow_up}\n"
+            "Approved clicks used: "
+            + str(
+                state.get(
+                    "hops",
+                    0,
+                )
+            )
+            + "\n\n"
+            "Relevant evidence:\n"
+        )
+
+        emitted = 0
+
+        for source in sources:
+
+            for passage in source.get(
+                "passages",
+                [],
+            ):
+
+                if emitted >= 6:
+                    break
+
+                output += (
+                    "- "
+                    + str(passage).strip()
+                    + "\n"
+                )
+
+                emitted += 1
+
+            if emitted >= 6:
+                break
+
+        output += (
+            "\nSources:\n"
+        )
+
+        source_number = 1
+
+        for source in sources:
+
+            if not source.get(
+                "passages"
+            ):
+                continue
+
+            output += (
+                f"{source_number}. "
+                + str(
+                    source.get(
+                        "title",
+                        "",
+                    )
+                ).strip()
+                + "\n   "
+                + str(
+                    source.get(
+                        "url",
+                        "",
+                    )
+                ).strip()
+                + "\n"
+            )
+
+            source_number += 1
+
+        if source_number == 1:
+
+            output += (
+                "No verified evidence sources were collected.\n"
+            )
+
+        self.agent_goal = None
+
+        return output.rstrip()
+
+    def _agent_research_stop_message(
+        self,
+        state,
+        reason,
+        title,
+        url,
+    ):
+        count = (
+            self._agent_research_evidence_count(
+                state
+            )
+        )
+
+        self.agent_goal = None
+
+        return (
+            "Aether: Browser research stopped safely.\n"
+            f"Reason: {reason}\n"
+            "Verified relevant passages collected: "
+            f"{count}\n"
+            f"Title: {title}\n"
+            f"URL: {url}\n"
+            "I will not invent the missing information."
+        )
 
     def _agent_page_key(
         self,
@@ -2335,6 +2898,126 @@ class BrowserSkill:
                     "all goal concepts matched"
                 )
 
+            # ---------------------------------
+            # RESEARCH BRIDGE RELEVANCE
+            # ---------------------------------
+            #
+            # During deep research, a page may not expose the
+            # final research target immediately.
+            #
+            # Example:
+            #
+            #   research goal: installing python modules
+            #
+            # A documentation landing page may expose:
+            #
+            #   Python
+            #   Python Docs
+            #
+            # Both match "python", but "Python Docs" also
+            # preserves the already-verified primary goal:
+            #
+            #   documentation -> docs
+            #
+            # That makes it a grounded bridge toward deeper
+            # research without letting Aether guess.
+            # ---------------------------------
+
+            if state.get(
+                "research_mode",
+                False,
+            ):
+
+                primary_goal = str(
+                    state.get(
+                        "primary_goal",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                if primary_goal:
+
+                    (
+                        bridge_matches,
+                        bridge_total,
+                    ) = (
+                        self._agent_match_goal_tokens(
+                            primary_goal,
+                            label_tokens,
+                        )
+                    )
+
+                    if bridge_matches:
+
+                        bridge_concepts = {
+                            goal_word
+                            for (
+                                goal_word,
+                                matched_word,
+                                match_type,
+                            ) in bridge_matches
+                        }
+
+                        bridge_score = (
+                            len(
+                                bridge_concepts
+                            )
+                            * 180
+                        )
+
+                        score += (
+                            bridge_score
+                        )
+
+                        bridge_reason = []
+
+                        for (
+                            goal_word,
+                            matched_word,
+                            match_type,
+                        ) in bridge_matches:
+
+                            if (
+                                goal_word
+                                == matched_word
+                            ):
+
+                                bridge_reason.append(
+                                    goal_word
+                                )
+
+                            else:
+
+                                bridge_reason.append(
+                                    (
+                                        goal_word
+                                        + "?"
+                                        + matched_word
+                                    )
+                                )
+
+                        reasons.append(
+                            "research bridge "
+                            + ", ".join(
+                                bridge_reason
+                            )
+                        )
+
+                        if (
+                            bridge_total > 0
+                            and len(
+                                bridge_concepts
+                            )
+                            == bridge_total
+                        ):
+
+                            score += 120
+
+                            reasons.append(
+                                "preserves primary page goal"
+                            )
+
             candidates.append(
                 {
                     "label": label,
@@ -2632,17 +3315,142 @@ class BrowserSkill:
             )
         )
 
+        follow_up = str(
+            state.get(
+                "follow_up",
+                "",
+            )
+            or ""
+        ).strip()
+
+        # ---------------------------------
+        # ACTIVE DEEP RESEARCH
+        # ---------------------------------
+
+        if (
+            state.get(
+                "research_mode",
+                False,
+            )
+            and follow_up
+        ):
+
+            self._agent_collect_research_evidence(
+                state,
+                title,
+                url,
+                visible_text,
+            )
+
+            if self._agent_research_ready(
+                state
+            ):
+
+                return (
+                    self._agent_render_research_answer(
+                        state,
+                        title,
+                        url,
+                    )
+                )
+
+        # ---------------------------------
+        # PAGE GOAL COMPLETED
+        # ---------------------------------
+
         if evidence.get(
             "complete",
             False,
         ):
 
-            return self._agent_finish_goal(
+            if not follow_up:
+
+                return self._agent_finish_goal(
+                    state,
+                    evidence,
+                    title,
+                    url,
+                    visible_text,
+                )
+
+            # Collect anything useful from the destination
+            # before deciding whether another page is needed.
+            self._agent_collect_research_evidence(
                 state,
-                evidence,
                 title,
                 url,
                 visible_text,
+            )
+
+            if self._agent_research_ready(
+                state
+            ):
+
+                return (
+                    self._agent_render_research_answer(
+                        state,
+                        title,
+                        url,
+                    )
+                )
+
+            research_query = (
+                self._agent_research_query(
+                    follow_up
+                )
+            )
+
+            if not research_query:
+
+                return self._agent_finish_goal(
+                    state,
+                    evidence,
+                    title,
+                    url,
+                    visible_text,
+                )
+
+            if not state.get(
+                "research_mode",
+                False,
+            ):
+
+                state[
+                    "primary_goal"
+                ] = state.get(
+                    "goal",
+                    "",
+                )
+
+                state[
+                    "research_mode"
+                ] = True
+
+                state[
+                    "research_query"
+                ] = research_query
+
+                state[
+                    "goal"
+                ] = research_query
+
+                state[
+                    "max_hops"
+                ] = max(
+                    int(
+                        state.get(
+                            "max_hops",
+                            3,
+                        )
+                    ),
+                    5,
+                )
+
+            # Refresh the local goal variable used by the
+            # existing target-selection logic below.
+            goal = state.get(
+                "goal",
+                research_query,
             )
 
         if (
@@ -2842,6 +3650,10 @@ class BrowserSkill:
             "goal": goal,
             "site": site,
             "follow_up": follow_up,
+            "primary_goal": goal,
+            "research_mode": False,
+            "research_query": "",
+            "research_sources": [],
             "hops": 0,
             "max_hops": self.agent_max_hops,
             "history": [],
