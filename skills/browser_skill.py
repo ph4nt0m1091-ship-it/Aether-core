@@ -3820,6 +3820,1267 @@ class BrowserSkill:
             ),
         }
 
+    # ---------------------------------
+    # NATURAL MULTI-STEP FORM TASKS
+    # ---------------------------------
+
+    def _split_natural_form_steps(
+        self,
+        value,
+    ):
+        """
+        Split natural form steps only outside quoted text.
+
+        Supported separators:
+        - then
+        - and then
+        - , then
+        - , and then
+
+        This prevents commas inside a form value from
+        accidentally creating another action.
+        """
+
+        value = str(
+            value or ""
+        ).strip()
+
+        if not value:
+            return []
+
+        separators = (
+            ", and then ",
+            ", then ",
+            " and then ",
+            " then ",
+        )
+
+        pieces = []
+
+        current = []
+
+        in_quote = False
+
+        index = 0
+
+        while index < len(value):
+
+            character = value[
+                index
+            ]
+
+            if character == '"':
+
+                in_quote = (
+                    not in_quote
+                )
+
+                current.append(
+                    character
+                )
+
+                index += 1
+
+                continue
+
+            matched_separator = None
+
+            if not in_quote:
+
+                lower_tail = value[
+                    index:
+                ].lower()
+
+                for separator in separators:
+
+                    if lower_tail.startswith(
+                        separator
+                    ):
+
+                        matched_separator = (
+                            separator
+                        )
+
+                        break
+
+            if matched_separator is not None:
+
+                piece = "".join(
+                    current
+                ).strip()
+
+                if piece:
+                    pieces.append(
+                        piece
+                    )
+
+                current = []
+
+                index += len(
+                    matched_separator
+                )
+
+                continue
+
+            current.append(
+                character
+            )
+
+            index += 1
+
+        if in_quote:
+
+            return []
+
+        final_piece = "".join(
+            current
+        ).strip()
+
+        if final_piece:
+            pieces.append(
+                final_piece
+            )
+
+        return pieces
+
+    def _parse_natural_form_task(
+        self,
+        message,
+    ):
+        """
+        Parse a bounded natural browser form task.
+
+        Example:
+
+        go to example.com and
+        fill "Name" with "Aether",
+        then fill "Message" with "Hello",
+        then click "Submit"
+        """
+
+        message = str(
+            message or ""
+        ).strip()
+
+        match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(.+?)\s+and\s+'
+            r'(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        site = (
+            match.group(1)
+            .strip()
+            .strip('"')
+        )
+
+        actions_text = (
+            match.group(2)
+            .strip()
+        )
+
+        # Form planner only claims requests beginning
+        # with a fill action. Other browser goals continue
+        # through the normal browser planners.
+        if not re.match(
+            r'^fill\s+"',
+            actions_text,
+            re.IGNORECASE,
+        ):
+            return None
+
+        pieces = (
+            self._split_natural_form_steps(
+                actions_text
+            )
+        )
+
+        if not pieces:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser form planning stopped.\n"
+                    "The form actions contain unmatched quotes "
+                    "or could not be separated safely."
+                ),
+            }
+
+        if len(pieces) < 2:
+
+            return None
+
+        if len(pieces) > 6:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser form planning stopped.\n"
+                    "A single natural form task is limited "
+                    "to 6 consequential actions."
+                ),
+            }
+
+        actions = []
+
+        click_count = 0
+
+        for index, piece in enumerate(
+            pieces
+        ):
+
+            fill_match = re.match(
+                r'^fill\s+"([^"]+)"\s+'
+                r'with\s+"([^"]*)"$',
+                piece,
+                re.IGNORECASE,
+            )
+
+            if fill_match:
+
+                field = (
+                    fill_match.group(1)
+                    .strip()
+                )
+
+                value = (
+                    fill_match.group(2)
+                )
+
+                if not field:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. A form field name is empty."
+                        ),
+                    }
+
+                if len(value) > 1000:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. Form text is limited "
+                            "to 1000 characters per field."
+                        ),
+                    }
+
+                if any(
+                    character in value
+                    for character in (
+                        "\n",
+                        "\r",
+                        "\t",
+                    )
+                ):
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. Control characters are "
+                            "not allowed in form values."
+                        ),
+                    }
+
+                # WorkflowSkill separates steps using the
+                # literal phrase " then ". Do not allow form
+                # text to create an unintended workflow step.
+                if " then " in value.lower():
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. A form value contains "
+                            'the reserved workflow separator '
+                            '"then".'
+                        ),
+                    }
+
+                # Prevent a form value from being interpreted
+                # as a workflow result reference.
+                if (
+                    "{{" in value
+                    or "}}" in value
+                ):
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. Workflow-reference syntax "
+                            "is not allowed inside form values."
+                        ),
+                    }
+
+                actions.append(
+                    {
+                        "action": "fill",
+                        "field": field,
+                        "value": value,
+                    }
+                )
+
+                continue
+
+            click_match = re.match(
+                r'^(?:click|press)\s+'
+                r'"([^"]+)"$',
+                piece,
+                re.IGNORECASE,
+            )
+
+            if click_match:
+
+                target = (
+                    click_match.group(1)
+                    .strip()
+                )
+
+                if not target:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. A click target is empty."
+                        ),
+                    }
+
+                click_count += 1
+
+                if click_count > 1:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. This form-task mode allows "
+                            "only one final click action."
+                        ),
+                    }
+
+                if index != (
+                    len(pieces) - 1
+                ):
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Browser form planning "
+                            "stopped. The click action must be "
+                            "the final action in this form task."
+                        ),
+                    }
+
+                actions.append(
+                    {
+                        "action": "click",
+                        "target": target,
+                    }
+                )
+
+                continue
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser form planning stopped.\n"
+                    "I only accept quoted fill actions and "
+                    "one optional final quoted click.\n"
+                    'Example: fill "Name" with "Aether" '
+                    'then click "Submit"'
+                ),
+            }
+
+        if not any(
+            item.get(
+                "action"
+            )
+            == "fill"
+            for item in actions
+        ):
+
+            return None
+
+        return {
+            "success": True,
+            "site": site,
+            "actions": actions,
+        }
+
+    def _resolve_form_actions(
+        self,
+        elements,
+        actions,
+    ):
+        """
+        Ground every requested form action against the
+        currently visible DOM before creating the workflow.
+        """
+
+        resolved = []
+
+        for item in actions:
+
+            action = item.get(
+                "action"
+            )
+
+            if action == "fill":
+
+                field, error = (
+                    self._goal_named_field_candidate(
+                        elements,
+                        item.get(
+                            "field",
+                            "",
+                        ),
+                    )
+                )
+
+                if error:
+
+                    return (
+                        None,
+                        error,
+                    )
+
+                if '"' in field:
+
+                    return (
+                        None,
+                        (
+                            "A resolved field contains an "
+                            "unsupported quote character."
+                        ),
+                    )
+
+                resolved.append(
+                    {
+                        "action": "fill",
+                        "field": field,
+                        "value": item.get(
+                            "value",
+                            "",
+                        ),
+                    }
+                )
+
+                continue
+
+            if action == "click":
+
+                target, error = (
+                    self._goal_named_element_candidate(
+                        elements,
+                        item.get(
+                            "target",
+                            "",
+                        ),
+                    )
+                )
+
+                if error:
+
+                    return (
+                        None,
+                        error,
+                    )
+
+                if '"' in target:
+
+                    return (
+                        None,
+                        (
+                            "A resolved click target contains "
+                            "an unsupported quote character."
+                        ),
+                    )
+
+                resolved.append(
+                    {
+                        "action": "click",
+                        "target": target,
+                    }
+                )
+
+                continue
+
+            return (
+                None,
+                "An unsupported form action was requested.",
+            )
+
+        return (
+            resolved,
+            None,
+        )
+
+    def _build_form_workflow_request(
+        self,
+        actions,
+    ):
+        parts = []
+
+        for item in actions:
+
+            if item.get(
+                "action"
+            ) == "fill":
+
+                parts.append(
+                    'fill "'
+                    + item[
+                        "field"
+                    ]
+                    + '" with '
+                    + item.get(
+                        "value",
+                        "",
+                    )
+                )
+
+            elif item.get(
+                "action"
+            ) == "click":
+
+                parts.append(
+                    'browser click "'
+                    + item[
+                        "target"
+                    ]
+                    + '"'
+                )
+
+                # Observe where the final browser action went.
+                parts.append(
+                    "browser status"
+                )
+
+        return " then ".join(
+            parts
+        )
+
+    def plan_natural_form_task(
+        self,
+        message,
+    ):
+        """
+        Build a permission-gated browser workflow for
+        multiple verified form actions on one live page.
+        """
+
+        parsed = (
+            self._parse_natural_form_task(
+                message
+            )
+        )
+
+        if parsed is None:
+            return None
+
+        if not parsed.get(
+            "success",
+            False,
+        ):
+            return parsed
+
+        page = (
+            self._prepare_goal_page(
+                parsed.get(
+                    "site",
+                    "",
+                )
+            )
+        )
+
+        if not page.get(
+            "success",
+            False,
+        ):
+            return page
+
+        resolved, error = (
+            self._resolve_form_actions(
+                page.get(
+                    "elements",
+                    [],
+                ),
+                parsed.get(
+                    "actions",
+                    [],
+                ),
+            )
+        )
+
+        if error:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser form planning stopped.\n"
+                    + error
+                ),
+            }
+
+        workflow_request = (
+            self._build_form_workflow_request(
+                resolved
+            )
+        )
+
+        if not workflow_request:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: Browser form planning stopped. "
+                    "No executable actions were produced."
+                ),
+            }
+
+        summaries = []
+
+        for item in resolved:
+
+            if item.get(
+                "action"
+            ) == "fill":
+
+                summaries.append(
+                    (
+                        'Fill "'
+                        + item[
+                            "field"
+                        ]
+                        + '" ('
+                        + str(
+                            len(
+                                item.get(
+                                    "value",
+                                    "",
+                                )
+                            )
+                        )
+                        + " characters)"
+                    )
+                )
+
+            else:
+
+                summaries.append(
+                    (
+                        'Click "'
+                        + item[
+                            "target"
+                        ]
+                        + '"'
+                    )
+                )
+
+        return {
+            "success": True,
+            "site": parsed.get(
+                "site",
+                "",
+            ),
+            "url": page.get(
+                "url",
+                "",
+            ),
+            "title": page.get(
+                "title",
+                "",
+            ),
+            "actions": resolved,
+            "summaries": summaries,
+            "workflow_request": workflow_request,
+        }
+
+    def _plan_multi_action_form_goal(
+        self,
+        message,
+    ):
+        """
+        Build a verified browser workflow for multiple form
+        actions.
+
+        Supported deterministic shape:
+
+            go to SITE and
+            fill "FIELD" with "VALUE" and
+            fill "FIELD" with "VALUE" and
+            click "TARGET"
+
+        Every field and click target is verified against the
+        live DOM before the workflow is created.
+
+        Execution remains permission-gated by Aether's normal
+        browser/workflow system.
+        """
+
+        message = str(
+            message or ""
+        ).strip()
+
+        match = re.match(
+            r'^(?:go to|visit|open)\s+'
+            r'(\S+)\s+and\s+(.+)$',
+            message,
+            re.IGNORECASE,
+        )
+
+        if not match:
+            return None
+
+        site = (
+            match.group(1)
+            .strip()
+            .strip('"')
+        )
+
+        action_text = (
+            match.group(2)
+            .strip()
+        )
+
+        # This planner intentionally activates only when there
+        # are multiple explicit form actions. Single actions
+        # remain with Aether's existing browser planner.
+        action_pattern = re.compile(
+            r'fill\s+"([^"]+)"\s+with\s+"([^"]*)"'
+            r'|click\s+"([^"]+)"',
+            re.IGNORECASE,
+        )
+
+        matches = list(
+            action_pattern.finditer(
+                action_text
+            )
+        )
+
+        if len(matches) < 2:
+            return None
+
+        # ---------------------------------
+        # MAKE SURE NOTHING WAS SILENTLY
+        # IGNORED BY THE PARSER
+        # ---------------------------------
+
+        residue_parts = []
+
+        last_end = 0
+
+        for item in matches:
+
+            residue_parts.append(
+                action_text[
+                    last_end:
+                    item.start()
+                ]
+            )
+
+            last_end = item.end()
+
+        residue_parts.append(
+            action_text[
+                last_end:
+            ]
+        )
+
+        residue = " ".join(
+            residue_parts
+        )
+
+        residue = re.sub(
+            r'[\s,]+',
+            ' ',
+            residue,
+        )
+
+        residue = re.sub(
+            r'\b(?:and|then)\b',
+            ' ',
+            residue,
+            flags=re.IGNORECASE,
+        )
+
+        residue = re.sub(
+            r'\s+',
+            ' ',
+            residue,
+        ).strip()
+
+        if residue:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: I understood part of the form "
+                    "request, but some instructions were not "
+                    "recognized exactly. I will not execute a "
+                    "partial form task.\n"
+                    f"Unrecognized text: {residue}"
+                ),
+            }
+
+        if len(matches) > 8:
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: This form request contains more "
+                    "than 8 browser actions. I will not create "
+                    "an oversized form workflow."
+                ),
+            }
+
+        parsed_actions = []
+
+        click_seen = False
+
+        for item in matches:
+
+            field = item.group(1)
+            value = item.group(2)
+            target = item.group(3)
+
+            if field is not None:
+
+                if click_seen:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Form fields must be filled "
+                            "before the final click. I will not "
+                            "guess what should happen after a "
+                            "navigation or submit action."
+                        ),
+                    }
+
+                field = field.strip()
+
+                if not field:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: A form field name was empty."
+                        ),
+                    }
+
+                if len(value) > 1000:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            f'Aether: The value for "{field}" '
+                            "is longer than the browser safety "
+                            "limit of 1000 characters."
+                        ),
+                    }
+
+                parsed_actions.append(
+                    {
+                        "kind": "fill",
+                        "field": field,
+                        "value": value,
+                    }
+                )
+
+            else:
+
+                target = str(
+                    target or ""
+                ).strip()
+
+                if not target:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: A browser click target "
+                            "was empty."
+                        ),
+                    }
+
+                if click_seen:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            "Aether: Multi-form tasks currently "
+                            "allow only one final click. "
+                            "I will not chain multiple page-changing "
+                            "actions without re-inspecting."
+                        ),
+                    }
+
+                click_seen = True
+
+                parsed_actions.append(
+                    {
+                        "kind": "click",
+                        "target": target,
+                    }
+                )
+
+        # ---------------------------------
+        # NAVIGATE
+        # ---------------------------------
+
+        navigation = self.provider.execute(
+            "browser_navigate",
+            {
+                "url": site,
+            },
+        )
+
+        if not navigation.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: I could not safely open the "
+                    "requested form page.\n"
+                    + str(
+                        navigation.get(
+                            "error",
+                            "",
+                        )
+                    )
+                ).rstrip(),
+            }
+
+        # ---------------------------------
+        # INSPECT LIVE DOM
+        # ---------------------------------
+
+        inspection = self.provider.execute(
+            "browser_inspect",
+            {},
+        )
+
+        if not inspection.get(
+            "success",
+            False,
+        ):
+
+            return {
+                "success": False,
+                "response": (
+                    "Aether: The page opened, but I could not "
+                    "inspect the live form controls safely."
+                ),
+            }
+
+        elements = inspection.get(
+            "elements",
+            [],
+        )
+
+        # ---------------------------------
+        # VERIFY EVERY ACTION BEFORE
+        # CREATING THE WORKFLOW
+        # ---------------------------------
+
+        verified = []
+
+        for action in parsed_actions:
+
+            if action[
+                "kind"
+            ] == "fill":
+
+                wanted = (
+                    self._normalize_goal_label(
+                        action[
+                            "field"
+                        ]
+                    )
+                )
+
+                candidates = []
+
+                for element in elements:
+
+                    tag = str(
+                        element.get(
+                            "tag",
+                            "",
+                        )
+                    ).lower()
+
+                    if tag not in (
+                        "input",
+                        "textarea",
+                    ):
+                        continue
+
+                    label = str(
+                        element.get(
+                            "label",
+                            "",
+                        )
+                    ).strip()
+
+                    if not label:
+                        continue
+
+                    if (
+                        self._normalize_goal_label(
+                            label
+                        )
+                        == wanted
+                    ):
+
+                        candidates.append(
+                            element
+                        )
+
+                if len(candidates) != 1:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            f'Aether: I could not verify exactly '
+                            f'one visible form field named '
+                            f'"{action["field"]}". '
+                            "I will not guess."
+                        ),
+                    }
+
+                candidate = candidates[0]
+
+                field_type = str(
+                    candidate.get(
+                        "type",
+                        "",
+                    )
+                ).lower()
+
+                if field_type == "password":
+
+                    return {
+                        "success": False,
+                        "response": (
+                            f'Aether: "{action["field"]}" is a '
+                            "password field. Automated password "
+                            "entry is blocked."
+                        ),
+                    }
+
+                verified.append(
+                    {
+                        "kind": "fill",
+                        "field": str(
+                            candidate.get(
+                                "label",
+                                action[
+                                    "field"
+                                ],
+                            )
+                        ).strip(),
+                        "value": action[
+                            "value"
+                        ],
+                    }
+                )
+
+            else:
+
+                wanted = (
+                    self._normalize_goal_label(
+                        action[
+                            "target"
+                        ]
+                    )
+                )
+
+                candidates = []
+
+                for element in elements:
+
+                    tag = str(
+                        element.get(
+                            "tag",
+                            "",
+                        )
+                    ).lower()
+
+                    if tag not in (
+                        "a",
+                        "button",
+                        "input",
+                    ):
+                        continue
+
+                    label = str(
+                        element.get(
+                            "label",
+                            "",
+                        )
+                    ).strip()
+
+                    if not label:
+                        continue
+
+                    if (
+                        self._normalize_goal_label(
+                            label
+                        )
+                        == wanted
+                    ):
+
+                        candidates.append(
+                            element
+                        )
+
+                if len(candidates) != 1:
+
+                    return {
+                        "success": False,
+                        "response": (
+                            f'Aether: I could not verify exactly '
+                            f'one visible clickable element named '
+                            f'"{action["target"]}". '
+                            "I will not guess."
+                        ),
+                    }
+
+                verified.append(
+                    {
+                        "kind": "click",
+                        "target": str(
+                            candidates[0].get(
+                                "label",
+                                action[
+                                    "target"
+                                ],
+                            )
+                        ).strip(),
+                    }
+                )
+
+        # ---------------------------------
+        # WORKFLOW STRING
+        # ---------------------------------
+
+        workflow_steps = []
+
+        for action in verified:
+
+            if action[
+                "kind"
+            ] == "fill":
+
+                safe_field = (
+                    action[
+                        "field"
+                    ]
+                    .replace(
+                        '"',
+                        "",
+                    )
+                )
+
+                safe_value = (
+                    action[
+                        "value"
+                    ]
+                    .replace(
+                        '"',
+                        "",
+                    )
+                )
+
+                workflow_steps.append(
+                    f'browser fill "{safe_field}" '
+                    f'with "{safe_value}"'
+                )
+
+            else:
+
+                safe_target = (
+                    action[
+                        "target"
+                    ]
+                    .replace(
+                        '"',
+                        "",
+                    )
+                )
+
+                workflow_steps.append(
+                    f'browser click "{safe_target}"'
+                )
+
+        if click_seen:
+
+            # Observe the result after the final page-changing
+            # action instead of assuming submission succeeded.
+            workflow_steps.append(
+                "browser status"
+            )
+
+        return {
+            "success": True,
+            "site": site,
+            "url": navigation.get(
+                "url",
+                site,
+            ),
+            "title": navigation.get(
+                "title",
+                "",
+            ),
+            "field": (
+                verified[0].get(
+                    "field"
+                )
+                if verified
+                and verified[0][
+                    "kind"
+                ] == "fill"
+                else None
+            ),
+            "target": (
+                next(
+                    (
+                        item[
+                            "target"
+                        ]
+                        for item in verified
+                        if item[
+                            "kind"
+                        ] == "click"
+                    ),
+                    None,
+                )
+            ),
+            "form_task": True,
+            "form_actions": verified,
+            "workflow_request": (
+                " then ".join(
+                    workflow_steps
+                )
+            ),
+        }
+
     def plan_natural_browser_goal(
         self,
         message,
@@ -3847,6 +5108,15 @@ class BrowserSkill:
 
         if continuation_goal is not None:
             return continuation_goal
+
+        form_plan = (
+            self._plan_multi_action_form_goal(
+                message
+            )
+        )
+
+        if form_plan is not None:
+            return form_plan
 
         existing_search = (
             self.plan_natural_search_goal(

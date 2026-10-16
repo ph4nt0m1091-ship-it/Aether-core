@@ -941,6 +941,101 @@ class Brain:
 
         if browser_skill is not None:
 
+            # ---------------------------------
+            # MULTI-STEP BROWSER FORM TASK
+            # ---------------------------------
+
+            form_plan = (
+                browser_skill
+                .plan_natural_form_task(
+                    message
+                )
+            )
+
+            if form_plan is not None:
+
+                if not form_plan.get(
+                    "success",
+                    False,
+                ):
+
+                    return form_plan.get(
+                        "response",
+                        (
+                            "Aether: Browser form planning "
+                            "failed safely."
+                        ),
+                    )
+
+                workflow_message = (
+                    "workflow "
+                    + form_plan[
+                        "workflow_request"
+                    ]
+                )
+
+                workflow_response = (
+                    self.skill_manager
+                    .handle(
+                        workflow_message
+                    )
+                )
+
+                if workflow_response is None:
+
+                    return (
+                        "Aether: I verified the browser form "
+                        "controls, but could not create the "
+                        "permission-gated workflow. "
+                        "Nothing further was executed."
+                    )
+
+                action_lines = []
+
+                for index, summary in enumerate(
+                    form_plan.get(
+                        "summaries",
+                        [],
+                    ),
+                    start=1,
+                ):
+
+                    action_lines.append(
+                        f"{index}. {summary}"
+                    )
+
+                details = "\n".join(
+                    action_lines
+                )
+
+                return (
+                    "Aether: Verified multi-step browser "
+                    "form task.\n"
+                    "Page: "
+                    + str(
+                        form_plan.get(
+                            "title",
+                            "",
+                        )
+                    )
+                    + "\n"
+                    "URL: "
+                    + str(
+                        form_plan.get(
+                            "url",
+                            "",
+                        )
+                    )
+                    + (
+                        "\n\nActions:\n"
+                        + details
+                        if details
+                        else ""
+                    )
+                    + "\n\n"
+                    + workflow_response
+                )
+
             agent_response = (
                 browser_skill
                 .start_goal_driven_navigation(
